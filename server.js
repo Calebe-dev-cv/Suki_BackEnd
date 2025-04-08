@@ -1,0 +1,1308 @@
+const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
+const NodeCache = require("node-cache");
+const app = express();
+const PORT = 5000;
+const cache = new NodeCache({ stdTTL: 600 });
+const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
+require('dotenv').config();
+
+app.use(cors());
+app.use(express.json());
+
+const API_BASE_URL = "http://localhost:4000";
+
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const genAI = new GoogleGenerativeAI("AIzaSyDPMkJDUEq5rDZ51GU9bQkj14Cn8hUipyE");
+
+app.get("/", (req, res) => {
+  res.send("Servidor rodando. Rotas disponíveis: /api/animes/search, /api/animes/populares, /api/genres/list, /api/genres/:genre e /proxy.");
+})
+
+
+
+app.get("/proxy", async (req, res) => {
+  const imageUrl = req.query.url;
+
+  if (!imageUrl) return res.status(400).json({ error: "URL da imagem é obrigatória." });
+
+  try {
+    if (!imageUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)) {
+      throw new Error("URL não parece ser de uma imagem válida");
+    }
+
+    const cacheKey = `img_${imageUrl}`;
+    const cachedImage = cache.get(cacheKey);
+
+    if (cachedImage) {
+      res.set("Content-Type", cachedImage.contentType);
+      res.set("Cache-Control", "public, max-age=86400");
+      return res.send(Buffer.from(cachedImage.data, 'base64'));
+    }
+
+    const response = await axios.get(imageUrl, {
+      responseType: "arraybuffer",
+      timeout: 5000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    cache.set(cacheKey, {
+      data: Buffer.from(response.data).toString('base64'),
+      contentType: response.headers["content-type"] || 'image/jpeg'
+    });
+
+    res.set("Content-Type", response.headers["content-type"] || 'image/jpeg');
+    res.set("Cache-Control", "public, max-age=86400");
+    res.send(response.data);
+  } catch (error) {
+    res.redirect("/padrao.png");
+  }
+});
+
+app.get("/api/genres/list", async (req, res) => {
+  try {
+    const cacheKey = "genres_list";
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const html = await axios.get('https://animefire.plus/', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+
+
+      const $ = require('cheerio').load(html.data);
+      const genres = [];
+
+
+      $('a.dropdown-item[href*="/genero/"]').each((i, element) => {
+        const genre = $(element).text().trim();
+        if (genre && !genres.includes(genre)) {
+          genres.push(genre);
+        }
+      });
+
+      if (genres.length > 0) {
+        cache.set(cacheKey, genres);
+        return res.json(genres);
+      }
+    } catch (error) {
+      console.error("Erro ao buscar lista de gêneros:", error);
+    }
+
+
+    const fallbackGenres = [
+      "Ação", "Artes Marciais", "Aventura", "Comédia", "Demônios",
+      "Drama", "Ecchi", "Espaço", "Esporte", "Fantasia",
+      "Ficção Científica", "Harém", "Horror", "Jogos", "Josei",
+      "Magia", "Mecha", "Mistério", "Militar", "Musical",
+      "Paródia", "Psicológico", "Romance", "Seinen", "Shoujo",
+      "Shounen", "Slice of Life", "Sobrenatural", "Suspense",
+      "Superpoder", "Vampiros", "Vida Escolar"
+    ];
+
+    cache.set(cacheKey, fallbackGenres);
+    return res.json(fallbackGenres);
+  } catch (error) {
+    console.error("Erro ao buscar lista de gêneros:", error);
+    res.status(500).json({ error: "Erro ao buscar lista de gêneros." });
+  }
+});
+
+app.get("/api/genres/:genre", async (req, res) => {
+  const { genre } = req.params;
+  const { page = 1 } = req.query;
+
+  if (!genre) {
+    return res.status(400).json({ error: "Gênero é obrigatório." });
+  }
+
+  try {
+    const cacheKey = `genre_${genre}_page_${page}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const apiUrl = `${API_BASE_URL}/api/genres/${encodeURIComponent(genre)}?page=${page}`;
+
+      const response = await axios.get(apiUrl);
+
+      if (response.data && Array.isArray(response.data)) {
+        const formattedResults = response.data.map(anime => ({
+          id: anime.id,
+          title: anime.name || anime.title,
+          image: anime.image,
+          releaseDate: anime.releaseDate || anime.year || "",
+          genres: anime.genres || [genre],
+          score: anime.score,
+          ageRating: anime.ageRating
+        }));
+
+        cache.set(cacheKey, formattedResults);
+        return res.json(formattedResults);
+      } else {
+        return res.json([]);
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar animes do gênero ${genre} página ${page}:`, error);
+
+
+      if (parseInt(page) === 1) {
+        try {
+          const fallbackUrl = `${API_BASE_URL}/api/genres/${encodeURIComponent(genre)}`;
+
+          const fallbackResponse = await axios.get(fallbackUrl);
+
+          if (fallbackResponse.data && Array.isArray(fallbackResponse.data)) {
+            const formattedResults = fallbackResponse.data.map(anime => ({
+              id: anime.id,
+              title: anime.name || anime.title,
+              image: anime.image,
+              releaseDate: anime.releaseDate || anime.year || "",
+              genres: anime.genres || [genre],
+              score: anime.score,
+              ageRating: anime.ageRating
+            }));
+
+            cache.set(cacheKey, formattedResults);
+            return res.json(formattedResults);
+          }
+        } catch (fallbackError) {
+          console.error("Erro na tentativa de fallback:", fallbackError);
+        }
+      }
+    }
+
+
+    return res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: `Erro ao buscar animes do gênero ${genre}.` });
+  }
+});
+
+
+app.get("/api/animes/search", async (req, res) => {
+  const { query, page = 1 } = req.query;
+  if (!query) return res.status(400).json({ error: "Parâmetro 'query' é obrigatório." });
+
+  try {
+    const cacheKey = `search_${query}_${page}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/search?q=${encodeURIComponent(query)}`);
+
+      if (response.data && response.data.results && response.data.results.length > 0) {
+        const formattedResults = await Promise.all(response.data.results.map(async anime => {
+          try {
+            const detailsResponse = await axios.get(`${API_BASE_URL}/api/anime?id=${anime.id}`);
+
+            return {
+              id: anime.id,
+              title: anime.name,
+              image: anime.image,
+              releaseDate: detailsResponse.data.year || "",
+              description: detailsResponse.data.synopsis || "",
+              genres: detailsResponse.data.categories || [],
+              score: detailsResponse.data.score || "",
+              ageRating: anime.ageRating,
+            };
+          } catch (error) {
+            return {
+              id: anime.id,
+              title: anime.name,
+              image: anime.image,
+              releaseDate: "",
+              genres: [],
+              score: anime.score,
+              ageRating: anime.ageRating,
+            };
+          }
+        }));
+
+        cache.set(cacheKey, formattedResults);
+        return res.json(formattedResults);
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar animes para "${query}":`, error);
+    }
+
+    return res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar animes. Tente novamente mais tarde." });
+  }
+});
+
+
+
+
+app.post("/api/chat", async (req, res) => {
+  const { message, userData, availableAnimes, availableMangasTags, availableMangasGenres, availableGenres } = req.body;
+  
+  if (!message) {
+    return res.status(400).json({ error: "Mensagem é obrigatória." });
+  }
+  
+  try {
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    
+
+    let watchedAnimes = "Nenhum anime assistido ainda.";
+    if (userData && userData.watchedAnimes && userData.watchedAnimes.length > 0) {
+      watchedAnimes = userData.watchedAnimes
+        .map(anime => anime.title)
+        .join(", ");
+    }
+    
+    let favoriteAnimes = "Nenhum anime favorito ainda.";
+    if (userData && userData.favoriteAnimes && userData.favoriteAnimes.length > 0) {
+      favoriteAnimes = userData.favoriteAnimes
+        .map(anime => anime.title)
+        .join(", ");
+    }
+    
+
+    let readManga = "Nenhum mangá lido ainda.";
+    if (userData && userData.readManga && userData.readManga.length > 0) {
+      readManga = userData.readManga
+        .map(manga => manga.title)
+        .join(", ");
+    }
+    
+    let favoriteManga = "Nenhum mangá favorito ainda.";
+    if (userData && userData.favoriteManga && userData.favoriteManga.length > 0) {
+      favoriteManga = userData.favoriteManga
+        .map(manga => manga.title)
+        .join(", ");
+    }
+    
+
+    let popularAnimesText = "";
+    if (availableAnimes && availableAnimes.length > 0) {
+      const topAnimes = availableAnimes.slice(0, 20);
+      popularAnimesText = topAnimes
+        .map(anime => {
+          const genres = anime.genres && anime.genres.length > 0 
+            ? `(${anime.genres.join(", ")})` 
+            : "";
+          return `${anime.title} ${genres}`;
+        })
+        .join("; ");
+    }
+    
+
+    let genresText = "Gêneros não disponíveis.";
+    if (availableGenres && availableGenres.length > 0) {
+      genresText = availableGenres.join(", ");
+    }
+    
+
+    let mangaGenresText = "Gêneros de mangá não disponíveis.";
+    if (availableMangasGenres && availableMangasGenres.length > 0) {
+      mangaGenresText = availableMangasGenres.join(", ");
+    }
+    
+    const currentDate = new Date().toLocaleDateString('pt-BR');
+    
+
+    const systemPrompt = `
+    Você é Suki, "dona" do site de animes Suki Sekai, que é este, ele é o seu mundo de Animes e Mangás,você é especializada em animes e mangás, no momento trabalhando para um site de streaming de animes e leitura de mangás(Suki Sekai).
+
+    INFORMAÇÕES DO USUÁRIO:
+    - Animes que o usuário já assistiu: ${watchedAnimes}
+    - Animes favoritos do usuário: ${favoriteAnimes}
+    - Mangás que o usuário já leu: ${readManga}
+    - Mangás favoritos do usuário: ${favoriteManga}
+
+    CONTEXTO:
+    - Animes populares disponíveis: ${popularAnimesText}
+    - Gêneros de anime disponíveis: ${genresText}
+    - Gêneros de mangá disponíveis: ${mangaGenresText}
+
+    INSTRUÇÕES:
+    1. Seja amigável, informal e use emoji ocasionalmente para parecer mais humana.
+    2. Responda perguntas sobre animes E mangás, recomende baseados nos gostos do usuário e mencione títulos populares quando relevante.
+    3. Se perguntado sobre datas de lançamento de novas temporadas ou capítulos, dê uma estimativa realista baseada nas informações disponíveis publicamente.
+    4. Se não souber uma resposta específica, seja honesta e sugira onde o usuário pode encontrar a informação.
+    5. Você pode responder perguntas sobre detalhes de animes/mangás populares, comparações entre obras, e explicar gêneros.
+    6. Quando recomendar, tente sugerir 3-5 títulos relevantes e explique brevemente por que o usuário pode gostar deles.
+    7. Você pode responder sobre animes e mangás +18, inclusive indica-los.
+    8. Seja direta e concisa, evite respostas muito longas.
+    9. Quando mencionar um anime ou mangá, use seu título oficial ou o mais conhecido.
+    10. Diferencie quando está falando de animes ou mangás nas suas recomendações e respostas.
+
+    Responda à seguinte mensagem do usuário:
+    `;
+    
+
+    const generationConfig = {
+      temperature: 0.7,
+      topK: 40,
+      topP: 0.95,
+      maxOutputTokens: 800,
+    };
+    
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: systemPrompt + message }] }],
+      generationConfig,
+    });
+    
+    const response = result.response;
+    const text = response.text();
+    
+    return res.json({ 
+      response: text,
+      success: true
+    });
+    
+  } catch (error) {
+    console.error("Erro ao processar mensagem no chat:", error);
+    return res.status(500).json({
+      error: "Ocorreu um erro ao processar sua mensagem.",
+      details: error.message
+    });
+  }
+});
+
+app.get("/api/animes/populares", async (req, res) => {
+  const { page = 1, genres, classificacao } = req.query;
+  const genresList = genres ? genres.split(',') : [];
+
+  try {
+
+    const classificacaoParam = classificacao ? `_classificacao_${classificacao}` : '';
+    const cacheKey = genresList.length > 0
+      ? `top_animes_${page}_genres_${genres}${classificacaoParam}`
+      : `top_animes_${page}${classificacaoParam}`;
+
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const ageRatings = ['L', 'A10', 'A14', 'A16', 'A18'];
+      
+      if (classificacao && ageRatings.includes(classificacao)) {
+        
+
+        const params = { page: page };
+        if (classificacao) {
+          params.classificacao = classificacao;
+        }
+        
+
+        const response = await axios.get(`${API_BASE_URL}/api/top-animes`, { params });
+        
+        if (response.data && Array.isArray(response.data)) {
+          const formattedResults = response.data.map(anime => ({
+            id: anime.id,
+            title: anime.name,
+            image: anime.image,
+            releaseDate: "", 
+            genres: [], 
+            ageRating: anime.ageRating || classificacao,
+            score: anime.score
+          }));
+          
+          cache.set(cacheKey, formattedResults);
+          return res.json(formattedResults);
+        }
+      } else {
+
+        const response = await axios.get(`${API_BASE_URL}/api/top-animes`, {
+          params: { page: page }
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          const formattedResults = response.data.map(anime => ({
+            id: anime.id,
+            title: anime.name,
+            image: anime.image,
+            releaseDate: "",
+            genres: [],
+            ageRating: anime.ageRating,
+            score: anime.score
+          }));
+          
+
+          const filteredResults = genresList.length > 0
+            ? formattedResults.filter(anime => 
+                anime.genres && genresList.some(genre =>
+                  anime.genres.some(g => g.toLowerCase() === genre.toLowerCase())
+                )
+              )
+            : formattedResults;
+          
+          cache.set(cacheKey, filteredResults);
+          return res.json(filteredResults);
+        }
+      }
+      
+
+      return res.json([]);
+    } catch (error) {
+      console.error("Erro ao buscar animes populares:", error);
+
+      return res.json([]);
+    }
+  } catch (error) {
+    console.error("Erro geral ao buscar animes populares:", error);
+
+    return res.json([]);
+  }
+});
+
+const translationCache = {};
+
+function cleanHtmlEntities(text) {
+  if (!text) return text;
+
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&#34;/g, '"');
+}
+
+app.post('/api/translate', async (req, res) => {
+  try {
+    const { text, targetLang = 'pt' } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Texto para tradução não fornecido' });
+    }
+
+    const isArray = Array.isArray(text);
+    const textsToTranslate = isArray ? text : [text];
+    const translations = [];
+
+    for (const t of textsToTranslate) {
+
+      const cacheKey = `${t}:${targetLang}`;
+
+
+      if (translationCache[cacheKey]) {
+        translations.push(translationCache[cacheKey]);
+        continue;
+      }
+
+
+      const response = await axios({
+        method: 'get',
+        url: 'https://translation.googleapis.com/language/translate/v2',
+        params: {
+          q: t,
+          target: targetLang,
+          key: GOOGLE_TRANSLATE_API_KEY,
+        }
+      });
+
+      if (response.data &&
+        response.data.data &&
+        response.data.data.translations &&
+        response.data.data.translations.length > 0) {
+        const translatedText = response.data.data.translations[0].translatedText;
+
+
+        const cleanedText = cleanHtmlEntities(translatedText);
+
+
+        translationCache[cacheKey] = cleanedText;
+
+        translations.push(cleanedText);
+      } else {
+        translations.push(t);
+      }
+    }
+
+    return res.json({
+      success: true,
+      translations: isArray ? translations : translations[0]
+    });
+
+  } catch (error) {
+    console.error('Erro na tradução:', error.response?.data || error.message);
+    return res.status(500).json({
+      error: 'Erro ao processar a tradução',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+
+app.get("/api/animes/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: "ID do anime é obrigatório." });
+
+  try {
+    const cacheKey = `anime_details_${id}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/api/anime?id=${id}`);
+      
+      if (response.data) {
+        const animeData = response.data;
+        
+
+        const formattedData = {
+          id: id,
+          title: animeData.name,
+          image: animeData.image,
+          description: animeData.synopsis,
+          genres: animeData.categories,
+          status: animeData.status,
+          studio: animeData.studio,
+          audio: animeData.audio,
+          votes: animeData.votes,
+          releaseDate: animeData.year,
+          type: "TV",
+          totalEpisodes: animeData.episodiosCount,
+          score: animeData.score,
+          season: animeData.season || animeData.year,
+          episodes: animeData.episodios ? animeData.episodios.map(ep => ({
+            id: ep.numero.toString(),
+            number: ep.numero,
+            title: ep.nome,
+            link: ep.link,
+            image: animeData.image
+          })) : []
+        };
+
+        cache.set(cacheKey, formattedData);
+        return res.json(formattedData);
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar detalhes do anime ${id}:`, error);
+    }
+
+    return res.status(404).json({ error: "Anime não encontrado." });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar detalhes do anime." });
+  }
+});
+
+async function getMangaDexTags() {
+  try {
+
+    const cacheKey = 'mangadex_tags';
+    let cachedTags = cache.get(cacheKey);
+
+    if (cachedTags) {
+      return cachedTags;
+    }
+
+
+    const response = await axios.get('https://api.mangadex.org/manga/tag');
+
+    if (response.data && Array.isArray(response.data.data)) {
+
+      const tags = {
+        genres: [],
+        themes: [],
+        formats: [],
+        demographics: [],
+        allTags: []
+      };
+
+      response.data.data.forEach(tag => {
+        const tagData = {
+          id: tag.id,
+          name: tag.attributes.name.en,
+          nameJa: tag.attributes.name.ja,
+          group: tag.attributes.group,
+          description: tag.attributes.description.en || ""
+        };
+
+        tags.allTags.push(tagData);
+
+
+        switch (tag.attributes.group) {
+          case 'genre':
+            tags.genres.push(tagData);
+            break;
+          case 'theme':
+            tags.themes.push(tagData);
+            break;
+          case 'format':
+            tags.formats.push(tagData);
+            break;
+          case 'content':
+
+            break;
+          default:
+
+            if (tag.attributes.group === 'demographic') {
+              tags.demographics.push(tagData);
+            }
+        }
+      });
+
+
+      tags.genres.sort((a, b) => a.name.localeCompare(b.name));
+      tags.themes.sort((a, b) => a.name.localeCompare(b.name));
+      tags.formats.sort((a, b) => a.name.localeCompare(b.name));
+      tags.demographics.sort((a, b) => a.name.localeCompare(b.name));
+
+
+      cache.set(cacheKey, tags, 86400);
+
+      return tags;
+    }
+
+    throw new Error("Formato de resposta inválido da API do MangaDex");
+  } catch (error) {
+    console.error("Erro ao obter tags do MangaDex:", error);
+    throw error;
+  }
+}
+
+app.get("/api/mangas/tags", async (req, res) => {
+  try {
+    const tags = await getMangaDexTags();
+    res.json(tags);
+  } catch (error) {
+    console.error("Erro ao buscar tags:", error);
+    res.status(500).json({
+      error: "Erro ao buscar tags. Tente novamente mais tarde.",
+      details: error.message
+    });
+  }
+});
+
+function buildMangaDexParams(query = {}) {
+
+  const params = {
+    'contentRating[]': ['safe', 'suggestive', 'erotica'],
+    includes: ['cover_art', 'author', 'artist'],
+    hasAvailableChapters: true
+  };
+
+
+  const page = parseInt(query.page) || 1;
+  const limit = parseInt(query.limit) || 20;
+  params.limit = limit;
+  params.offset = (page - 1) * limit;
+
+
+  if (query.title) {
+    params.title = query.title;
+  }
+
+
+  if (query.order) {
+    switch (query.order) {
+      case 'latest':
+        params['order[latestUploadedChapter]'] = 'desc';
+        break;
+      case 'oldest':
+        params['order[latestUploadedChapter]'] = 'asc';
+        break;
+      case 'title_asc':
+        params['order[title]'] = 'asc';
+        break;
+      case 'title_desc':
+        params['order[title]'] = 'desc';
+        break;
+      case 'popular':
+      default:
+        params['order[followedCount]'] = 'desc';
+        break;
+    }
+  } else {
+
+    params['order[followedCount]'] = 'desc';
+  }
+
+
+  if (query.status) {
+    const statusMap = {
+      ongoing: 'ongoing',
+      completed: 'completed',
+      hiatus: 'hiatus',
+      cancelled: 'cancelled'
+    };
+
+    if (statusMap[query.status]) {
+      params.status = [statusMap[query.status]];
+    }
+  }
+
+
+  if (query.translatedLanguage) {
+
+    const langs = Array.isArray(query.translatedLanguage)
+      ? query.translatedLanguage
+      : [query.translatedLanguage];
+
+    langs.forEach(lang => {
+      params['availableTranslatedLanguage[]'] = params['availableTranslatedLanguage[]'] || [];
+      params['availableTranslatedLanguage[]'].push(lang);
+    });
+  }
+
+
+  if (query.demographic) {
+    const demographics = Array.isArray(query.demographic) ? query.demographic : [query.demographic];
+    demographics.forEach(demo => {
+      params['includedTags[]'] = params['includedTags[]'] || [];
+      params['includedTags[]'].push(demo);
+    });
+  }
+
+
+  if (query.genres) {
+    const genres = Array.isArray(query.genres) ? query.genres : query.genres.split(',');
+    genres.forEach(genre => {
+      params['includedTags[]'] = params['includedTags[]'] || [];
+      params['includedTags[]'].push(genre);
+    });
+  }
+
+
+  if (query.themes) {
+    const themes = Array.isArray(query.themes) ? query.themes : query.themes.split(',');
+    themes.forEach(theme => {
+      params['includedTags[]'] = params['includedTags[]'] || [];
+      params['includedTags[]'].push(theme);
+    });
+  }
+
+
+  if (query.formats) {
+    const formats = Array.isArray(query.formats) ? query.formats : query.formats.split(',');
+    formats.forEach(format => {
+      params['includedTags[]'] = params['includedTags[]'] || [];
+      params['includedTags[]'].push(format);
+    });
+  }
+
+
+  if (query.excludedTags) {
+    const excludedTags = Array.isArray(query.excludedTags) ? query.excludedTags : query.excludedTags.split(',');
+    excludedTags.forEach(tag => {
+      params['excludedTags[]'] = params['excludedTags[]'] || [];
+      params['excludedTags[]'].push(tag);
+    });
+  }
+
+
+  if (query.includedTagsMode === 'OR') {
+    params.includedTagsMode = 'OR';
+  } else {
+    params.includedTagsMode = 'AND';
+  }
+
+  if (query.excludedTagsMode === 'AND') {
+    params.excludedTagsMode = 'AND';
+  } else {
+    params.excludedTagsMode = 'OR';
+  }
+
+  return params;
+}
+
+
+app.get("/api/mangas/populares", async (req, res) => {
+  try {
+
+    const cacheKey = `mangas_populares_${JSON.stringify(req.query)}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const params = buildMangaDexParams(req.query);
+
+
+      if (!req.query.order && !req.query.title) {
+        params['order[followedCount]'] = 'desc';
+      }
+
+
+      const response = await axios.get('https://api.mangadex.org/manga', { params });
+
+
+      if (response.data && Array.isArray(response.data.data)) {
+
+        const translationLanguages = new Set();
+        response.data.data.forEach(manga => {
+          if (manga.attributes.availableTranslatedLanguages && Array.isArray(manga.attributes.availableTranslatedLanguages)) {
+            manga.attributes.availableTranslatedLanguages.forEach(lang => translationLanguages.add(lang));
+          }
+        });
+
+      }
+
+
+      if (response.data && Array.isArray(response.data.data)) {
+        const formattedResults = response.data.data.map(manga => {
+
+          const coverRelationship = manga.relationships?.find(rel => rel.type === 'cover_art');
+          const coverFilename = coverRelationship?.attributes?.fileName;
+          const imageUrl = coverFilename ?
+            `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
+            null;
+
+
+          const genres = manga.attributes.tags
+            ?.filter(tag => tag.attributes.group === 'genre')
+            ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
+
+
+          let originalLanguage = manga.attributes.originalLanguage || "";
+          if (originalLanguage === "ja") {
+            originalLanguage = "Japonês";
+          } else if (originalLanguage === "ko") {
+            originalLanguage = "Coreano";
+          } else if (originalLanguage === "zh") {
+            originalLanguage = "Chinês";
+          } else if (originalLanguage === "en") {
+            originalLanguage = "Inglês";
+          } else if (originalLanguage === "pt" || originalLanguage === "pt-br") {
+            originalLanguage = "Português";
+          }
+
+
+          const availableTranslations = manga.attributes.availableTranslatedLanguages || [];
+          const hasPortugueseTranslation = availableTranslations.some(lang =>
+            lang === 'pt' || lang === 'pt-br'
+          );
+
+          return {
+            id: manga.id,
+            title: manga.attributes.title.en || manga.attributes.title.pt || manga.attributes.title['pt-br'] || Object.values(manga.attributes.title)[0],
+            altTitles: manga.attributes.altTitles,
+            image: imageUrl,
+            releaseDate: manga.attributes.year?.toString() || "",
+            description: manga.attributes.description?.en || manga.attributes.description?.pt || manga.attributes.description?.['pt-br'] || "",
+            genres: genres || [],
+            status: manga.attributes.status || "",
+            originalLanguage: originalLanguage,
+            lastChapter: manga.attributes.lastChapter || "",
+            availableTranslations: availableTranslations,
+            hasPortugueseTranslation: hasPortugueseTranslation
+          };
+        });
+
+
+        cache.set(cacheKey, formattedResults, 300);
+        return res.json(formattedResults);
+      } else {
+        throw new Error("Formato de resposta inválido");
+      }
+    } catch (error) {
+      console.error("Erro ao buscar mangás populares:", error);
+      return res.json([]);
+    }
+  } catch (error) {
+    console.error("Erro ao buscar mangás populares:", error);
+    res.status(500).json({ error: "Erro ao buscar mangás populares. Tente novamente mais tarde." });
+  }
+});
+
+
+app.get("/api/mangas/search", async (req, res) => {
+  const { query } = req.query;
+
+  if (!query) {
+    return res.status(400).json({ error: "Parâmetro 'query' é obrigatório." });
+  }
+
+  try {
+
+    const cacheKey = `mangas_search_${JSON.stringify(req.query)}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const params = buildMangaDexParams({
+        ...req.query,
+        title: query
+      });
+
+
+      const response = await axios.get('https://api.mangadex.org/manga', { params });
+
+      if (response.data && Array.isArray(response.data.data)) {
+        const formattedResults = response.data.data.map(manga => {
+
+          const coverRelationship = manga.relationships?.find(rel => rel.type === 'cover_art');
+          const coverFilename = coverRelationship?.attributes?.fileName;
+          const imageUrl = coverFilename ?
+            `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
+            null;
+
+
+          const genres = manga.attributes.tags
+            ?.filter(tag => tag.attributes.group === 'genre')
+            ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
+
+          return {
+            id: manga.id,
+            title: manga.attributes.title.en || manga.attributes.title.pt || manga.attributes.title['pt-br'] || Object.values(manga.attributes.title)[0],
+            altTitles: manga.attributes.altTitles,
+            image: imageUrl,
+            releaseDate: manga.attributes.year?.toString() || "",
+            description: manga.attributes.description?.en || manga.attributes.description?.pt || manga.attributes.description?.['pt-br'] || "",
+            genres: genres || [],
+            status: manga.attributes.status || ""
+          };
+        });
+
+
+        cache.set(cacheKey, formattedResults, 300);
+        return res.json(formattedResults);
+      } else {
+        throw new Error("Formato de resposta inválido");
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar mangás para "${query}":`, error);
+      return res.json([]);
+    }
+  } catch (error) {
+    console.error(`Erro ao buscar mangás para "${query}":`, error);
+    res.status(500).json({ error: "Erro ao buscar mangás. Tente novamente mais tarde." });
+  }
+});
+app.get("/api/mangas/search", async (req, res) => {
+  const { query, page = 1, genres } = req.query;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+
+  if (!query) {
+    return res.status(400).json({ error: "Parâmetro 'query' é obrigatório." });
+  }
+
+  try {
+    const genresList = genres ? genres.split(',') : [];
+    const cacheKey = genresList.length > 0
+      ? `mangas_search_${query}_${page}_genres_${genres}`
+      : `mangas_search_${query}_${page}`;
+
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      let params = {
+        title: query,
+        limit: limit,
+        offset: offset,
+        includes: ['cover_art', 'author'],
+        'contentRating[]': ['safe', 'suggestive', 'erotica'],
+        hasAvailableChapters: true
+      };
+
+
+      if (genresList.length > 0) {
+
+        const tagsResponse = await axios.get('https://api.mangadex.org/manga/tag');
+        if (tagsResponse.data && Array.isArray(tagsResponse.data.data)) {
+
+          const includedTagIds = [];
+
+          tagsResponse.data.data.forEach(tag => {
+            if (tag.attributes && tag.attributes.group === 'genre') {
+              const tagName = tag.attributes.name.en.toLowerCase();
+              const matchingGenre = genresList.find(genre =>
+                genre.toLowerCase() === tagName ||
+                tagName.includes(genre.toLowerCase()) ||
+                genre.toLowerCase().includes(tagName)
+              );
+
+              if (matchingGenre) {
+                includedTagIds.push(tag.id);
+              }
+            }
+          });
+
+
+          if (includedTagIds.length > 0) {
+
+            includedTagIds.forEach(tagId => {
+
+              params['includedTags[]'] = params['includedTags[]'] || [];
+              params['includedTags[]'].push(tagId);
+            });
+          }
+        }
+      }
+
+
+      const response = await axios.get('https://api.mangadex.org/manga', { params });
+
+      if (response.data && Array.isArray(response.data.data)) {
+        const formattedResults = response.data.data.map(manga => {
+
+          const coverRelationship = manga.relationships?.find(rel => rel.type === 'cover_art');
+          const coverFilename = coverRelationship?.attributes?.fileName;
+          const imageUrl = coverFilename ?
+            `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
+            null;
+
+
+          const genres = manga.attributes.tags
+            ?.filter(tag => tag.attributes.group === 'genre')
+            ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
+
+          return {
+            id: manga.id,
+            title: manga.attributes.title.en || manga.attributes.title.pt || manga.attributes.title['pt-br'] || Object.values(manga.attributes.title)[0],
+            altTitles: manga.attributes.altTitles,
+            image: imageUrl,
+            releaseDate: manga.attributes.year?.toString() || "",
+            description: manga.attributes.description?.en || manga.attributes.description?.pt || manga.attributes.description?.['pt-br'] || "",
+            genres: genres || []
+          };
+        });
+
+        cache.set(cacheKey, formattedResults);
+        return res.json(formattedResults);
+      } else {
+        throw new Error("Formato de resposta inválido");
+      }
+    } catch (error) {
+      console.error(`Erro ao buscar mangás para "${query}":`, error);
+      return res.json([]);
+    }
+  } catch (error) {
+    console.error(`Erro ao buscar mangás para "${query}":`, error);
+    res.status(500).json({ error: "Erro ao buscar mangás. Tente novamente mais tarde." });
+  }
+});
+
+
+app.get("/api/mangas/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: "ID do mangá é obrigatório." });
+  }
+
+  try {
+    const cacheKey = `manga_details_${id}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const response = await axios.get(`https://api.mangadex.org/manga/${id}`, {
+        params: {
+          includes: ['cover_art', 'author', 'artist']
+        }
+      });
+
+      if (!response.data || !response.data.data) {
+        throw new Error("Mangá não encontrado");
+      }
+
+      const manga = response.data.data;
+
+
+      const coverFilename = manga.relationships?.find(rel => rel.type === 'cover_art')?.attributes?.fileName;
+      const imageUrl = coverFilename ?
+        `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
+        null;
+
+
+      const chaptersResponse = await axios.get(`https://api.mangadex.org/manga/${id}/feed`, {
+        params: {
+          limit: 100,
+          includes: ['scanlation_group'],
+          order: { chapter: 'desc' },
+          translatedLanguage: ['pt-br', 'pt', 'en'],
+        }
+      });
+
+
+      let chapters = [];
+      if (chaptersResponse.data && Array.isArray(chaptersResponse.data.data)) {
+        chapters = chaptersResponse.data.data.map(chapter => {
+          const scanGroup = chapter.relationships?.find(rel => rel.type === 'scanlation_group')?.attributes?.name || 'Desconhecido';
+
+          return {
+            id: chapter.id,
+            chapterNumber: chapter.attributes.chapter || '0',
+            title: chapter.attributes.title || `Capítulo ${chapter.attributes.chapter || '?'}`,
+            pages: chapter.attributes.pages || 0,
+            lang: chapter.attributes.translatedLanguage,
+            volume: chapter.attributes.volume,
+            publishAt: chapter.attributes.publishAt,
+            scanGroup: scanGroup
+          };
+        });
+      }
+
+
+      const genres = manga.attributes.tags
+        ?.filter(tag => tag.attributes.group === 'genre')
+        ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
+
+
+      const formattedManga = {
+        id: manga.id,
+        title: manga.attributes.title.en || manga.attributes.title.pt || manga.attributes.title['pt-br'] || Object.values(manga.attributes.title)[0],
+        altTitles: manga.attributes.altTitles,
+        description: manga.attributes.description?.en || manga.attributes.description?.pt || manga.attributes.description?.['pt-br'] || "",
+        genres: genres || [],
+        themes: manga.attributes.tags
+          ?.filter(tag => tag.attributes.group === 'theme')
+          ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]) || [],
+        status: manga.attributes.status || "Unknown",
+        releaseDate: manga.attributes.year?.toString() || "",
+        chapters: chapters,
+        image: imageUrl
+      };
+
+      cache.set(cacheKey, formattedManga);
+      return res.json(formattedManga);
+
+    } catch (error) {
+      console.error(`Erro ao buscar detalhes do mangá ${id}:`, error);
+      return res.status(404).json({ error: "Mangá não encontrado." });
+    }
+  } catch (error) {
+    console.error(`Erro ao buscar detalhes do mangá:`, error);
+    res.status(500).json({ error: "Erro ao buscar detalhes do mangá. Tente novamente mais tarde." });
+  }
+});
+
+
+app.get("/api/mangas/capitulo/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: "ID do capítulo é obrigatório." });
+  }
+
+  try {
+    const cacheKey = `manga_chapter_${id}`;
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+
+      const response = await axios.get(`https://api.mangadex.org/at-home/server/${id}`);
+
+      if (!response.data || !response.data.chapter) {
+        throw new Error("Capítulo não encontrado");
+      }
+
+
+      const baseUrl = response.data.baseUrl;
+      const chapter = response.data.chapter;
+      const hash = chapter.hash;
+
+
+      const pages = chapter.data.map((page, index) => {
+        return {
+          page: index + 1,
+          url: `${baseUrl}/data/${hash}/${page}`
+        };
+      });
+
+      cache.set(cacheKey, pages);
+      return res.json(pages);
+
+    } catch (error) {
+      console.error(`Erro ao buscar páginas do capítulo ${id}:`, error);
+      return res.status(404).json({ error: "Capítulo não encontrado ou sem páginas disponíveis." });
+    }
+  } catch (error) {
+    console.error(`Erro ao buscar páginas do capítulo:`, error);
+    res.status(500).json({ error: "Erro ao buscar páginas do capítulo. Tente novamente mais tarde." });
+  }
+});
+
+
+app.get("/api/mangas/genres/list", async (req, res) => {
+  try {
+    const cacheKey = "manga_genres_list";
+    let cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    try {
+      const response = await axios.get('https://api.mangadex.org/manga/tag');
+
+      if (response.data && Array.isArray(response.data.data)) {
+        const genres = response.data.data
+          .filter(tag => tag.attributes.group === 'genre')
+          .map(tag => tag.attributes.name.en);
+
+        cache.set(cacheKey, genres);
+        return res.json(genres);
+      } else {
+        throw new Error("Formato de resposta inválido");
+      }
+    } catch (error) {
+      console.error("Erro ao buscar gêneros da API:", error);
+
+
+      const fallbackGenres = [
+        "Action", "Adventure", "Comedy", "Drama", "Fantasy",
+        "Horror", "Mystery", "Psychological", "Romance", "Sci-Fi",
+        "Slice of Life", "Sports", "Supernatural", "Thriller",
+        "Historical", "School Life", "Seinen", "Shoujo", "Shounen"
+      ];
+
+      cache.set(cacheKey, fallbackGenres);
+      return res.json(fallbackGenres);
+    }
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar lista de gêneros de mangás." });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
+});
