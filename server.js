@@ -17,7 +17,7 @@ app.use(cors({
 
 app.use(express.json());
 
-const API_BASE_URL = "https://api-anime.sukisekai.com";
+const API_BASE_URL = "http://localhost:4000";
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI("AIzaSyDPMkJDUEq5rDZ51GU9bQkj14Cn8hUipyE");
