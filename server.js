@@ -11,7 +11,7 @@ require('dotenv').config();
 app.use(cors({
   origin: ['http://34.95.174.88:3000', 'http://localhost:3000', 'http://localhost:4000', 'http://34.95.174.88:4000', 'https://sukisekai.com', 'https://api-anime.sukisekai.com'],
   methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Range', 'Authorization', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Range', 'Authorization', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges'],
   credentials: true
 }));
@@ -77,7 +77,7 @@ app.get("/video-proxy", async (req, res) => {
       
       videoResponse.data.pipe(res);
     } else {
-      
+
       res.setHeader('Content-Length', contentLength);
       res.setHeader('Content-Type', contentType);
       
@@ -96,6 +96,39 @@ app.get("/video-proxy", async (req, res) => {
   } catch (error) {
     console.error("Erro no proxy de vídeo:", error.message);
     res.status(500).json({ error: "Erro ao processar o vídeo" });
+  }
+});
+
+app.get("/proxy", async (req, res) => {
+  const imageUrl = req.query.url;
+  const title = req.query.title || '';
+  
+  if (!imageUrl) {
+    return res.status(400).send("URL da imagem é obrigatória.");
+  }
+  
+  try {
+    const response = await axios({
+      method: 'GET',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://mangadex.org/'
+      }
+    });
+    
+    const contentType = response.headers['content-type'];
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
+    }
+    
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    
+    res.send(response.data);
+  } catch (error) {
+    console.error("Erro ao buscar imagem:", error.message);
+    res.status(500).send("Erro ao buscar imagem. Tente novamente mais tarde.");
   }
 });
 
