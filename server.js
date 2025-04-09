@@ -28,6 +28,12 @@ app.get("/", (req, res) => {
 })
 
 app.get("/proxy", async (req, res) => {
+
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+
+
   const imageUrl = req.query.url;
 
   if (!imageUrl) return res.status(400).json({ error: "URL da imagem é obrigatória." });
