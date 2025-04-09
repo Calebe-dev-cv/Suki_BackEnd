@@ -8,6 +8,9 @@ const cache = new NodeCache({ stdTTL: 600 });
 const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
 require('dotenv').config();
 
+const mangadexAuth = require('./mangadexAuth');
+
+
 app.use(cors({
   origin: ['http://34.95.174.88:3000', 'http://localhost:3000', 'http://localhost:4000', 'http://34.95.174.88:4000', 'https://sukisekai.com', 'https://api-anime.sukisekai.com'],
   methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
@@ -31,14 +34,14 @@ app.get("/", (req, res) => {
 
 app.get("/video-proxy", async (req, res) => {
   const videoUrl = req.query.url;
-  
+
   if (!videoUrl) {
     return res.status(400).json({ error: "URL do vídeo é obrigatória." });
   }
-  
+
   try {
     res.setHeader('Accept-Ranges', 'bytes');
-    
+
     const headResponse = await axios({
       method: 'HEAD',
       url: videoUrl,
@@ -47,23 +50,23 @@ app.get("/video-proxy", async (req, res) => {
         'Referer': 'https://animefire.plus/'
       }
     });
-    
+
     const contentLength = headResponse.headers['content-length'];
     const contentType = headResponse.headers['content-type'] || 'video/mp4';
-    
+
     const range = req.headers.range;
-    
+
     if (range) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : contentLength - 1;
       const chunksize = (end - start) + 1;
-      
+
       res.status(206);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${contentLength}`);
       res.setHeader('Content-Length', chunksize);
       res.setHeader('Content-Type', contentType);
-      
+
       const videoResponse = await axios({
         method: 'GET',
         url: videoUrl,
@@ -74,13 +77,13 @@ app.get("/video-proxy", async (req, res) => {
         },
         responseType: 'stream'
       });
-      
+
       videoResponse.data.pipe(res);
     } else {
 
       res.setHeader('Content-Length', contentLength);
       res.setHeader('Content-Type', contentType);
-      
+
       const videoResponse = await axios({
         method: 'GET',
         url: videoUrl,
@@ -90,7 +93,7 @@ app.get("/video-proxy", async (req, res) => {
         },
         responseType: 'stream'
       });
-      
+
       videoResponse.data.pipe(res);
     }
   } catch (error) {
@@ -101,11 +104,11 @@ app.get("/video-proxy", async (req, res) => {
 
 app.get("/mangadex-image", async (req, res) => {
   const imageUrl = req.query.url;
-  
+
   if (!imageUrl) {
     return res.status(400).send("URL da imagem é obrigatória.");
   }
-  
+
   try {
     const response = await axios({
       method: 'GET',
@@ -118,21 +121,19 @@ app.get("/mangadex-image", async (req, res) => {
         'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
         'Sec-Fetch-Site': 'same-site',
         'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Dest': 'image',
-        'Cookie': 'mangadex_session=1;' 
+        'Sec-Fetch-Dest': 'image'
       }
     });
-    
+
     if (response.headers['content-type']) {
       res.setHeader('Content-Type', response.headers['content-type']);
     }
-    
+
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    
+
     res.send(response.data);
   } catch (error) {
     console.error("Erro ao carregar imagem MangaDex:", error.message);
-    
     res.redirect(imageUrl);
   }
 });
@@ -140,14 +141,12 @@ app.get("/mangadex-image", async (req, res) => {
 app.get("/proxy", async (req, res) => {
   const imageUrl = req.query.url;
   const refererUrl = req.query.referer || 'https://mangadex.org/';
-  
+
   if (!imageUrl) {
     console.error("Erro no proxy: URL não fornecida");
     return res.status(400).send("URL da imagem é obrigatória.");
   }
-  
-  console.log(`Proxy: Tentando buscar imagem: ${imageUrl}`);
-  
+
   try {
     const response = await axios({
       method: 'GET',
@@ -168,7 +167,7 @@ app.get("/proxy", async (req, res) => {
       timeout: 15000,
       maxRedirects: 5
     });
-    
+
     if (response.headers['content-type']) {
       res.setHeader('Content-Type', response.headers['content-type']);
     } else {
@@ -185,11 +184,10 @@ app.get("/proxy", async (req, res) => {
         res.setHeader('Content-Type', 'application/octet-stream');
       }
     }
-    
+
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    
+
     res.send(response.data);
-    console.log(`Proxy: Imagem enviada com sucesso: ${imageUrl}`);
   } catch (error) {
     console.error("Erro detalhado ao buscar imagem:", {
       message: error.message,
@@ -198,20 +196,19 @@ app.get("/proxy", async (req, res) => {
       statusText: error.response?.statusText,
       url: imageUrl
     });
-    
+
     res.status(error.response?.status || 500).send("Erro ao carregar imagem");
   }
 });
 
 app.get("/proxy-alt", async (req, res) => {
   const imageUrl = req.query.url;
-  
+
   if (!imageUrl) {
     return res.status(400).send("URL da imagem é obrigatória.");
   }
-  
-  console.log(`Proxy alternativo: Tentando buscar imagem: ${imageUrl}`);
-  
+
+
   try {
     const config = {
       method: 'GET',
@@ -232,9 +229,9 @@ app.get("/proxy-alt", async (req, res) => {
       timeout: 15000,
       maxRedirects: 5
     };
-    
+
     const response = await axios(config);
-    
+
     if (response.headers['content-type']) {
       res.setHeader('Content-Type', response.headers['content-type']);
     } else {
@@ -251,10 +248,9 @@ app.get("/proxy-alt", async (req, res) => {
         res.setHeader('Content-Type', 'application/octet-stream');
       }
     }
-    
+
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(response.data);
-    console.log(`Proxy alternativo: Imagem enviada com sucesso: ${imageUrl}`);
   } catch (error) {
     console.error("Erro detalhado no proxy alternativo:", {
       message: error.message,
@@ -262,7 +258,7 @@ app.get("/proxy-alt", async (req, res) => {
       status: error.response?.status,
       url: imageUrl
     });
-    
+
     try {
       res.setHeader('Content-Type', 'text/html');
       res.send(`
@@ -913,10 +909,65 @@ async function getMangaDexTags() {
 
 app.get("/api/mangas/tags", async (req, res) => {
   try {
-    const tags = await getMangaDexTags();
-    res.json(tags);
+    const cacheKey = 'mangadex_tags';
+    let cachedTags = cache.get(cacheKey);
+
+    if (cachedTags) {
+      return res.json(cachedTags);
+    }
+
+    const response = await mangadexAuth.authenticatedMangaDexRequest('https://api.mangadex.org/manga/tag');
+
+    if (response.data && Array.isArray(response.data.data)) {
+      const tags = {
+        genres: [],
+        themes: [],
+        formats: [],
+        demographics: [],
+        allTags: []
+      };
+
+      response.data.data.forEach(tag => {
+        const tagData = {
+          id: tag.id,
+          name: tag.attributes.name.en,
+          nameJa: tag.attributes.name.ja,
+          group: tag.attributes.group,
+          description: tag.attributes.description.en || ""
+        };
+
+        tags.allTags.push(tagData);
+
+        switch (tag.attributes.group) {
+          case 'genre':
+            tags.genres.push(tagData);
+            break;
+          case 'theme':
+            tags.themes.push(tagData);
+            break;
+          case 'format':
+            tags.formats.push(tagData);
+            break;
+          default:
+            if (tag.attributes.group === 'demographic') {
+              tags.demographics.push(tagData);
+            }
+        }
+      });
+
+      tags.genres.sort((a, b) => a.name.localeCompare(b.name));
+      tags.themes.sort((a, b) => a.name.localeCompare(b.name));
+      tags.formats.sort((a, b) => a.name.localeCompare(b.name));
+      tags.demographics.sort((a, b) => a.name.localeCompare(b.name));
+
+      cache.set(cacheKey, tags, 86400);
+
+      return res.json(tags);
+    }
+
+    throw new Error("Formato de resposta inválido da API do MangaDex");
   } catch (error) {
-    console.error("Erro ao buscar tags:", error);
+    console.error("Erro ao obter tags do MangaDex:", error);
     res.status(500).json({
       error: "Erro ao buscar tags. Tente novamente mais tarde.",
       details: error.message
@@ -1059,7 +1110,6 @@ function buildMangaDexParams(query = {}) {
 
 app.get("/api/mangas/populares", async (req, res) => {
   try {
-
     const cacheKey = `mangas_populares_${JSON.stringify(req.query)}`;
     let cachedData = cache.get(cacheKey);
 
@@ -1068,44 +1118,23 @@ app.get("/api/mangas/populares", async (req, res) => {
     }
 
     try {
-
       const params = buildMangaDexParams(req.query);
 
-
-      if (!req.query.order && !req.query.title) {
-        params['order[followedCount]'] = 'desc';
-      }
-
-
-      const response = await axios.get('https://api.mangadex.org/manga', { params });
-
-
-      if (response.data && Array.isArray(response.data.data)) {
-
-        const translationLanguages = new Set();
-        response.data.data.forEach(manga => {
-          if (manga.attributes.availableTranslatedLanguages && Array.isArray(manga.attributes.availableTranslatedLanguages)) {
-            manga.attributes.availableTranslatedLanguages.forEach(lang => translationLanguages.add(lang));
-          }
-        });
-
-      }
-
+      const response = await mangadexAuth.authenticatedMangaDexRequest('https://api.mangadex.org/manga', {
+        params: params
+      });
 
       if (response.data && Array.isArray(response.data.data)) {
         const formattedResults = response.data.data.map(manga => {
-
           const coverRelationship = manga.relationships?.find(rel => rel.type === 'cover_art');
           const coverFilename = coverRelationship?.attributes?.fileName;
           const imageUrl = coverFilename ?
             `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
             null;
 
-
           const genres = manga.attributes.tags
             ?.filter(tag => tag.attributes.group === 'genre')
             ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
-
 
           let originalLanguage = manga.attributes.originalLanguage || "";
           if (originalLanguage === "ja") {
@@ -1119,7 +1148,6 @@ app.get("/api/mangas/populares", async (req, res) => {
           } else if (originalLanguage === "pt" || originalLanguage === "pt-br") {
             originalLanguage = "Português";
           }
-
 
           const availableTranslations = manga.attributes.availableTranslatedLanguages || [];
           const hasPortugueseTranslation = availableTranslations.some(lang =>
@@ -1141,7 +1169,6 @@ app.get("/api/mangas/populares", async (req, res) => {
             hasPortugueseTranslation: hasPortugueseTranslation
           };
         });
-
 
         cache.set(cacheKey, formattedResults, 300);
         return res.json(formattedResults);
@@ -1167,7 +1194,6 @@ app.get("/api/mangas/search", async (req, res) => {
   }
 
   try {
-
     const cacheKey = `mangas_search_${JSON.stringify(req.query)}`;
     let cachedData = cache.get(cacheKey);
 
@@ -1176,24 +1202,22 @@ app.get("/api/mangas/search", async (req, res) => {
     }
 
     try {
-
       const params = buildMangaDexParams({
         ...req.query,
         title: query
       });
 
-
-      const response = await axios.get('https://api.mangadex.org/manga', { params });
+      const response = await mangadexAuth.authenticatedMangaDexRequest('https://api.mangadex.org/manga', {
+        params: params
+      });
 
       if (response.data && Array.isArray(response.data.data)) {
         const formattedResults = response.data.data.map(manga => {
-
           const coverRelationship = manga.relationships?.find(rel => rel.type === 'cover_art');
           const coverFilename = coverRelationship?.attributes?.fileName;
           const imageUrl = coverFilename ?
             `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
             null;
-
 
           const genres = manga.attributes.tags
             ?.filter(tag => tag.attributes.group === 'genre')
@@ -1211,117 +1235,7 @@ app.get("/api/mangas/search", async (req, res) => {
           };
         });
 
-
         cache.set(cacheKey, formattedResults, 300);
-        return res.json(formattedResults);
-      } else {
-        throw new Error("Formato de resposta inválido");
-      }
-    } catch (error) {
-      console.error(`Erro ao buscar mangás para "${query}":`, error);
-      return res.json([]);
-    }
-  } catch (error) {
-    console.error(`Erro ao buscar mangás para "${query}":`, error);
-    res.status(500).json({ error: "Erro ao buscar mangás. Tente novamente mais tarde." });
-  }
-});
-app.get("/api/mangas/search", async (req, res) => {
-  const { query, page = 1, genres } = req.query;
-  const limit = 20;
-  const offset = (page - 1) * limit;
-
-  if (!query) {
-    return res.status(400).json({ error: "Parâmetro 'query' é obrigatório." });
-  }
-
-  try {
-    const genresList = genres ? genres.split(',') : [];
-    const cacheKey = genresList.length > 0
-      ? `mangas_search_${query}_${page}_genres_${genres}`
-      : `mangas_search_${query}_${page}`;
-
-    let cachedData = cache.get(cacheKey);
-
-    if (cachedData) {
-      return res.json(cachedData);
-    }
-
-    try {
-
-      let params = {
-        title: query,
-        limit: limit,
-        offset: offset,
-        includes: ['cover_art', 'author'],
-        'contentRating[]': ['safe', 'suggestive', 'erotica'],
-        hasAvailableChapters: true
-      };
-
-
-      if (genresList.length > 0) {
-
-        const tagsResponse = await axios.get('https://api.mangadex.org/manga/tag');
-        if (tagsResponse.data && Array.isArray(tagsResponse.data.data)) {
-
-          const includedTagIds = [];
-
-          tagsResponse.data.data.forEach(tag => {
-            if (tag.attributes && tag.attributes.group === 'genre') {
-              const tagName = tag.attributes.name.en.toLowerCase();
-              const matchingGenre = genresList.find(genre =>
-                genre.toLowerCase() === tagName ||
-                tagName.includes(genre.toLowerCase()) ||
-                genre.toLowerCase().includes(tagName)
-              );
-
-              if (matchingGenre) {
-                includedTagIds.push(tag.id);
-              }
-            }
-          });
-
-
-          if (includedTagIds.length > 0) {
-
-            includedTagIds.forEach(tagId => {
-
-              params['includedTags[]'] = params['includedTags[]'] || [];
-              params['includedTags[]'].push(tagId);
-            });
-          }
-        }
-      }
-
-
-      const response = await axios.get('https://api.mangadex.org/manga', { params });
-
-      if (response.data && Array.isArray(response.data.data)) {
-        const formattedResults = response.data.data.map(manga => {
-
-          const coverRelationship = manga.relationships?.find(rel => rel.type === 'cover_art');
-          const coverFilename = coverRelationship?.attributes?.fileName;
-          const imageUrl = coverFilename ?
-            `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
-            null;
-
-
-          const genres = manga.attributes.tags
-            ?.filter(tag => tag.attributes.group === 'genre')
-            ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
-
-          return {
-            id: manga.id,
-            title: manga.attributes.title.en || manga.attributes.title.pt || manga.attributes.title['pt-br'] || Object.values(manga.attributes.title)[0],
-            altTitles: manga.attributes.altTitles,
-            image: imageUrl,
-            releaseDate: manga.attributes.year?.toString() || "",
-            description: manga.attributes.description?.en || manga.attributes.description?.pt || manga.attributes.description?.['pt-br'] || "",
-            genres: genres || []
-          };
-        });
-
-        cache.set(cacheKey, formattedResults);
         return res.json(formattedResults);
       } else {
         throw new Error("Formato de resposta inválido");
@@ -1353,8 +1267,7 @@ app.get("/api/mangas/:id", async (req, res) => {
     }
 
     try {
-
-      const response = await axios.get(`https://api.mangadex.org/manga/${id}`, {
+      const response = await mangadexAuth.authenticatedMangaDexRequest(`https://api.mangadex.org/manga/${id}`, {
         params: {
           includes: ['cover_art', 'author', 'artist']
         }
@@ -1366,14 +1279,12 @@ app.get("/api/mangas/:id", async (req, res) => {
 
       const manga = response.data.data;
 
-
       const coverFilename = manga.relationships?.find(rel => rel.type === 'cover_art')?.attributes?.fileName;
       const imageUrl = coverFilename ?
         `https://uploads.mangadex.org/covers/${manga.id}/${coverFilename}` :
         null;
 
-
-      const chaptersResponse = await axios.get(`https://api.mangadex.org/manga/${id}/feed`, {
+      const chaptersResponse = await mangadexAuth.authenticatedMangaDexRequest(`https://api.mangadex.org/manga/${id}/feed`, {
         params: {
           limit: 100,
           includes: ['scanlation_group'],
@@ -1381,7 +1292,6 @@ app.get("/api/mangas/:id", async (req, res) => {
           translatedLanguage: ['pt-br', 'pt', 'en'],
         }
       });
-
 
       let chapters = [];
       if (chaptersResponse.data && Array.isArray(chaptersResponse.data.data)) {
@@ -1401,11 +1311,9 @@ app.get("/api/mangas/:id", async (req, res) => {
         });
       }
 
-
       const genres = manga.attributes.tags
         ?.filter(tag => tag.attributes.group === 'genre')
         ?.map(tag => tag.attributes.name.en || tag.attributes.name.ja || Object.values(tag.attributes.name)[0]);
-
 
       const formattedManga = {
         id: manga.id,
@@ -1424,9 +1332,8 @@ app.get("/api/mangas/:id", async (req, res) => {
 
       cache.set(cacheKey, formattedManga);
       return res.json(formattedManga);
-
     } catch (error) {
-      console.error(`Erro ao buscar detalhes do mangá ${id}:`, error);
+      console.error(`Erro ao buscar detalhes do mangá ${id}:`, error.message);
       return res.status(404).json({ error: "Mangá não encontrado." });
     }
   } catch (error) {
@@ -1452,18 +1359,15 @@ app.get("/api/mangas/capitulo/:id", async (req, res) => {
     }
 
     try {
+      const chapterData = await mangadexAuth.getMangaDexChapterServer(id);
 
-      const response = await axios.get(`https://api.mangadex.org/at-home/server/${id}`);
-
-      if (!response.data || !response.data.chapter) {
+      if (!chapterData || !chapterData.chapter) {
         throw new Error("Capítulo não encontrado");
       }
 
-
-      const baseUrl = response.data.baseUrl;
-      const chapter = response.data.chapter;
+      const baseUrl = chapterData.baseUrl;
+      const chapter = chapterData.chapter;
       const hash = chapter.hash;
-
 
       const pages = chapter.data.map((page, index) => {
         return {
@@ -1474,9 +1378,8 @@ app.get("/api/mangas/capitulo/:id", async (req, res) => {
 
       cache.set(cacheKey, pages);
       return res.json(pages);
-
     } catch (error) {
-      console.error(`Erro ao buscar páginas do capítulo ${id}:`, error);
+      console.error(`Erro ao buscar páginas do capítulo ${id}:`, error.message);
       return res.status(404).json({ error: "Capítulo não encontrado ou sem páginas disponíveis." });
     }
   } catch (error) {
