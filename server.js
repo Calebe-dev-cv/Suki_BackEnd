@@ -8,10 +8,16 @@ const cache = new NodeCache({ stdTTL: 600 });
 const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
 require('dotenv').config();
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Range'],
+  exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges']
+}));
+
 app.use(express.json());
 
-const API_BASE_URL = "http://localhost:4000";
+const API_BASE_URL = "https://api-anime.sukisekai.com";
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI("AIzaSyDPMkJDUEq5rDZ51GU9bQkj14Cn8hUipyE");
@@ -19,8 +25,6 @@ const genAI = new GoogleGenerativeAI("AIzaSyDPMkJDUEq5rDZ51GU9bQkj14Cn8hUipyE");
 app.get("/", (req, res) => {
   res.send("Servidor rodando. Rotas disponíveis: /api/animes/search, /api/animes/populares, /api/genres/list, /api/genres/:genre e /proxy.");
 })
-
-
 
 app.get("/proxy", async (req, res) => {
   const imageUrl = req.query.url;
@@ -255,15 +259,15 @@ app.get("/api/animes/search", async (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   const { message, userData, availableAnimes, availableMangasTags, availableMangasGenres, availableGenres } = req.body;
-  
+
   if (!message) {
     return res.status(400).json({ error: "Mensagem é obrigatória." });
   }
-  
+
   try {
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-    
+
 
     let watchedAnimes = "Nenhum anime assistido ainda.";
     if (userData && userData.watchedAnimes && userData.watchedAnimes.length > 0) {
@@ -271,14 +275,14 @@ app.post("/api/chat", async (req, res) => {
         .map(anime => anime.title)
         .join(", ");
     }
-    
+
     let favoriteAnimes = "Nenhum anime favorito ainda.";
     if (userData && userData.favoriteAnimes && userData.favoriteAnimes.length > 0) {
       favoriteAnimes = userData.favoriteAnimes
         .map(anime => anime.title)
         .join(", ");
     }
-    
+
 
     let readManga = "Nenhum mangá lido ainda.";
     if (userData && userData.readManga && userData.readManga.length > 0) {
@@ -286,42 +290,42 @@ app.post("/api/chat", async (req, res) => {
         .map(manga => manga.title)
         .join(", ");
     }
-    
+
     let favoriteManga = "Nenhum mangá favorito ainda.";
     if (userData && userData.favoriteManga && userData.favoriteManga.length > 0) {
       favoriteManga = userData.favoriteManga
         .map(manga => manga.title)
         .join(", ");
     }
-    
+
 
     let popularAnimesText = "";
     if (availableAnimes && availableAnimes.length > 0) {
       const topAnimes = availableAnimes.slice(0, 20);
       popularAnimesText = topAnimes
         .map(anime => {
-          const genres = anime.genres && anime.genres.length > 0 
-            ? `(${anime.genres.join(", ")})` 
+          const genres = anime.genres && anime.genres.length > 0
+            ? `(${anime.genres.join(", ")})`
             : "";
           return `${anime.title} ${genres}`;
         })
         .join("; ");
     }
-    
+
 
     let genresText = "Gêneros não disponíveis.";
     if (availableGenres && availableGenres.length > 0) {
       genresText = availableGenres.join(", ");
     }
-    
+
 
     let mangaGenresText = "Gêneros de mangá não disponíveis.";
     if (availableMangasGenres && availableMangasGenres.length > 0) {
       mangaGenresText = availableMangasGenres.join(", ");
     }
-    
+
     const currentDate = new Date().toLocaleDateString('pt-BR');
-    
+
 
     const systemPrompt = `
     Você é Suki, "dona" do site de animes Suki Sekai, que é este, ele é o seu mundo de Animes e Mangás,você é especializada em animes e mangás, no momento trabalhando para um site de streaming de animes e leitura de mangás(Suki Sekai).
@@ -351,7 +355,7 @@ app.post("/api/chat", async (req, res) => {
 
     Responda à seguinte mensagem do usuário:
     `;
-    
+
 
     const generationConfig = {
       temperature: 0.7,
@@ -359,21 +363,21 @@ app.post("/api/chat", async (req, res) => {
       topP: 0.95,
       maxOutputTokens: 800,
     };
-    
+
 
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: systemPrompt + message }] }],
       generationConfig,
     });
-    
+
     const response = result.response;
     const text = response.text();
-    
-    return res.json({ 
+
+    return res.json({
       response: text,
       success: true
     });
-    
+
   } catch (error) {
     console.error("Erro ao processar mensagem no chat:", error);
     return res.status(500).json({
@@ -403,29 +407,29 @@ app.get("/api/animes/populares", async (req, res) => {
     try {
 
       const ageRatings = ['L', 'A10', 'A14', 'A16', 'A18'];
-      
+
       if (classificacao && ageRatings.includes(classificacao)) {
-        
+
 
         const params = { page: page };
         if (classificacao) {
           params.classificacao = classificacao;
         }
-        
+
 
         const response = await axios.get(`${API_BASE_URL}/api/top-animes`, { params });
-        
+
         if (response.data && Array.isArray(response.data)) {
           const formattedResults = response.data.map(anime => ({
             id: anime.id,
             title: anime.name,
             image: anime.image,
-            releaseDate: "", 
-            genres: [], 
+            releaseDate: "",
+            genres: [],
             ageRating: anime.ageRating || classificacao,
             score: anime.score
           }));
-          
+
           cache.set(cacheKey, formattedResults);
           return res.json(formattedResults);
         }
@@ -434,7 +438,7 @@ app.get("/api/animes/populares", async (req, res) => {
         const response = await axios.get(`${API_BASE_URL}/api/top-animes`, {
           params: { page: page }
         });
-        
+
         if (response.data && Array.isArray(response.data)) {
           const formattedResults = response.data.map(anime => ({
             id: anime.id,
@@ -445,21 +449,21 @@ app.get("/api/animes/populares", async (req, res) => {
             ageRating: anime.ageRating,
             score: anime.score
           }));
-          
+
 
           const filteredResults = genresList.length > 0
-            ? formattedResults.filter(anime => 
-                anime.genres && genresList.some(genre =>
-                  anime.genres.some(g => g.toLowerCase() === genre.toLowerCase())
-                )
+            ? formattedResults.filter(anime =>
+              anime.genres && genresList.some(genre =>
+                anime.genres.some(g => g.toLowerCase() === genre.toLowerCase())
               )
+            )
             : formattedResults;
-          
+
           cache.set(cacheKey, filteredResults);
           return res.json(filteredResults);
         }
       }
-      
+
 
       return res.json([]);
     } catch (error) {
@@ -570,10 +574,10 @@ app.get("/api/animes/:id", async (req, res) => {
     try {
 
       const response = await axios.get(`${API_BASE_URL}/api/anime?id=${id}`);
-      
+
       if (response.data) {
         const animeData = response.data;
-        
+
 
         const formattedData = {
           id: id,
