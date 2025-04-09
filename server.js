@@ -110,26 +110,34 @@ app.get("/mangadex-image", async (req, res) => {
   }
 
   try {
+    // Primeiro buscar a página inicial para obter cookies de sessão válidos
+    const sessionResponse = await axios.get('https://mangadex.org/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+      },
+      maxRedirects: 5
+    });
+
+    // Extrair cookies
+    const sessionCookies = sessionResponse.headers['set-cookie'];
+
+    // Agora buscar a imagem com os cookies de sessão
     const response = await axios({
       method: 'GET',
       url: imageUrl,
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
         'Referer': 'https://mangadex.org/',
         'Origin': 'https://mangadex.org',
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-        'Sec-Fetch-Site': 'same-site',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Fetch-Site': 'cross-site',
         'Sec-Fetch-Mode': 'no-cors',
         'Sec-Fetch-Dest': 'image',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept-Language': 'en-US,en;q=0.9',
         'Cache-Control': 'no-cache',
-        'Cookie': 'mangadex_session=1; mangadex_rememberme_token=1; mangadex_privacy=1;'
-      },
-      withCredentials: true,
-      timeout: 15000,
-      maxRedirects: 5
+        'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
+      }
     });
 
     if (response.headers['content-type']) {
@@ -137,7 +145,6 @@ app.get("/mangadex-image", async (req, res) => {
     }
 
     res.setHeader('Cache-Control', 'public, max-age=86400');
-
     res.send(response.data);
   } catch (error) {
     console.error("Erro ao carregar imagem MangaDex:", error.message);
