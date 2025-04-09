@@ -7,6 +7,10 @@ const PORT = 5000;
 const cache = new NodeCache({ stdTTL: 600 });
 const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
 require('dotenv').config();
+const puppeteer = require('puppeteer');
+let browser;
+let sessionCookies = '';
+let lastCookieRefresh = 0;
 
 const mangadexAuth = require('./mangadexAuth');
 
@@ -30,7 +34,44 @@ app.get("/", (req, res) => {
   res.send("Servidor rodando. Rotas disponíveis: /api/animes/search, /api/animes/populares, /api/genres/list, /api/genres/:genre e /proxy.");
 })
 
+  (async () => {
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+      console.log('Navegador headless iniciado para proxy de imagens MangaDex');
 
+      // Obter cookies iniciais
+      await refreshMangaDexCookies();
+
+      // Configurar refresh periódico de cookies (a cada 30 minutos)
+      setInterval(refreshMangaDexCookies, 30 * 60 * 1000);
+    } catch (error) {
+      console.error('Erro ao iniciar navegador:', error);
+    }
+  })();
+
+async function refreshMangaDexCookies() {
+  try {
+    if (!browser) return;
+
+    const page = await browser.newPage();
+    await page.goto('https://mangadex.org', {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    const cookies = await page.cookies();
+    sessionCookies = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    lastCookieRefresh = Date.now();
+
+    console.log('Cookies do MangaDex atualizados com sucesso');
+    await page.close();
+  } catch (error) {
+    console.error('Erro ao atualizar cookies do MangaDex:', error);
+  }
+}
 
 app.get("/video-proxy", async (req, res) => {
   const videoUrl = req.query.url;
@@ -110,36 +151,28 @@ app.get("/mangadex-image", async (req, res) => {
   }
 
   try {
-    // Primeiro buscar a página inicial para obter cookies de sessão válidos
-    const sessionResponse = await axios.get('https://mangadex.org/', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-      },
-      maxRedirects: 5
-    });
+    // Verificar se precisamos atualizar os cookies (mais de 30 minutos)
+    if (Date.now() - lastCookieRefresh > 30 * 60 * 1000) {
+      await refreshMangaDexCookies();
+    }
 
-    // Extrair cookies
-    const sessionCookies = sessionResponse.headers['set-cookie'];
-
-    // Agora buscar a imagem com os cookies de sessão
+    // Usar cookies para obter a imagem
     const response = await axios({
       method: 'GET',
       url: imageUrl,
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://mangadex.org/',
         'Origin': 'https://mangadex.org',
         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Site': 'cross-site',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Dest': 'image',
-        'Cache-Control': 'no-cache',
-        'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
+        'Cookie': sessionCookies
       }
     });
 
+    // Retornar a imagem
     if (response.headers['content-type']) {
       res.setHeader('Content-Type', response.headers['content-type']);
     }
@@ -1441,6 +1474,12 @@ app.get("/api/mangas/genres/list", async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ error: "Erro ao buscar lista de gêneros de mangás." });
+  }
+});
+
+process.on('exit', async () => {
+  if (browser) {
+    await browser.close();
   }
 });
 
