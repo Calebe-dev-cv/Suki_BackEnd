@@ -27,59 +27,7 @@ app.get("/", (req, res) => {
   res.send("Servidor rodando. Rotas disponíveis: /api/animes/search, /api/animes/populares, /api/genres/list, /api/genres/:genre e /proxy.");
 })
 
-app.get("/proxy", async (req, res) => {
-  const imageUrl = req.query.url;
 
-  if (!imageUrl) return res.status(400).json({ error: "URL da imagem é obrigatória." });
-
-  try {
-    // Verifique se parece ser uma URL de imagem
-    if (!imageUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)) {
-      console.warn("URL não parece ser de uma imagem:", imageUrl);
-      // Continue mesmo assim, pois a extensão pode estar oculta
-    }
-
-    const cacheKey = `img_${imageUrl}`;
-    const cachedImage = cache.get(cacheKey);
-
-    if (cachedImage) {
-      res.set("Content-Type", cachedImage.contentType);
-      res.set("Cache-Control", "public, max-age=86400");
-      return res.send(Buffer.from(cachedImage.data, 'base64'));
-    }
-
-    const response = await axios.get(imageUrl, {
-      responseType: "arraybuffer",
-      timeout: 8000, // Aumento do timeout para 8 segundos
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://mangadex.org/',
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
-      },
-      maxRedirects: 5
-    });
-
-    // Verificar se recebemos uma imagem válida
-    const contentType = response.headers["content-type"] || '';
-    if (!contentType.startsWith('image/')) {
-      console.warn("Resposta não é uma imagem:", contentType);
-      throw new Error("A resposta não é uma imagem válida");
-    }
-
-    cache.set(cacheKey, {
-      data: Buffer.from(response.data).toString('base64'),
-      contentType: contentType
-    });
-
-    res.set("Content-Type", contentType);
-    res.set("Cache-Control", "public, max-age=86400");
-    res.send(response.data);
-  } catch (error) {
-    console.error("Erro no proxy de imagem:", error.message, "URL:", imageUrl);
-    // Redirecionar para uma imagem padrão
-    res.redirect("/padrao.png");
-  }
-});
 
 app.get("/video-proxy", async (req, res) => {
   const videoUrl = req.query.url;
@@ -89,10 +37,8 @@ app.get("/video-proxy", async (req, res) => {
   }
   
   try {
-    // Configurar cabeçalhos para streaming de vídeo
     res.setHeader('Accept-Ranges', 'bytes');
     
-    // Fazer uma solicitação HEAD para obter o tamanho do vídeo
     const headResponse = await axios({
       method: 'HEAD',
       url: videoUrl,
@@ -105,11 +51,9 @@ app.get("/video-proxy", async (req, res) => {
     const contentLength = headResponse.headers['content-length'];
     const contentType = headResponse.headers['content-type'] || 'video/mp4';
     
-    // Verificar se o cliente enviou cabeçalhos Range
     const range = req.headers.range;
     
     if (range) {
-      // Processar o streaming por partes (chunks)
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : contentLength - 1;
@@ -120,7 +64,6 @@ app.get("/video-proxy", async (req, res) => {
       res.setHeader('Content-Length', chunksize);
       res.setHeader('Content-Type', contentType);
       
-      // Stream o conteúdo
       const videoResponse = await axios({
         method: 'GET',
         url: videoUrl,
@@ -134,7 +77,7 @@ app.get("/video-proxy", async (req, res) => {
       
       videoResponse.data.pipe(res);
     } else {
-      // Sem range - enviar o vídeo inteiro
+      
       res.setHeader('Content-Length', contentLength);
       res.setHeader('Content-Type', contentType);
       
