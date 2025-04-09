@@ -99,6 +99,43 @@ app.get("/video-proxy", async (req, res) => {
   }
 });
 
+app.get("/mangadex-image", async (req, res) => {
+  const imageUrl = req.query.url;
+  
+  if (!imageUrl) {
+    return res.status(400).send("URL da imagem é obrigatória.");
+  }
+  
+  try {
+    const response = await axios({
+      method: 'GET',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+        'Referer': 'https://mangadex.org/',
+        'Origin': 'https://mangadex.org',
+        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+        'Sec-Fetch-Site': 'same-site',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Dest': 'image',
+        'Cookie': 'mangadex_session=1;' 
+      }
+    });
+    
+    if (response.headers['content-type']) {
+      res.setHeader('Content-Type', response.headers['content-type']);
+    }
+    
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    
+    res.send(response.data);
+  } catch (error) {
+    console.error("Erro ao carregar imagem MangaDex:", error.message);
+    
+    res.redirect(imageUrl);
+  }
+});
 
 app.get("/proxy", async (req, res) => {
   const imageUrl = req.query.url;
