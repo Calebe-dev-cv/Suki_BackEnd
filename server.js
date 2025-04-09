@@ -9,10 +9,11 @@ const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
 require('dotenv').config();
 
 app.use(cors({
-  origin: '*',
+  origin: ['http://34.95.174.88:3000', 'http://localhost:3000', 'http://localhost:4000', 'http://34.95.174.88:4000',],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Range'],
-  exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges']
+  exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges'],
+  credentials: true
 }));
 
 app.use(express.json());
