@@ -111,85 +111,36 @@ app.get("/mangadex-image", async (req, res) => {
   }
 
   try {
+    // Obter uma sessão válida do site principal do MangaDex (sem autenticação)
     const sessionResponse = await axios.get('https://mangadex.org/', {
       headers: {
-        'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
       },
       maxRedirects: 5
     });
 
     const sessionCookies = sessionResponse.headers['set-cookie'];
 
+    // Fazer a requisição da imagem, mas SEM enviar cabeçalhos de autenticação
     const response = await axios({
       method: 'GET',
       url: imageUrl,
       responseType: 'arraybuffer',
       headers: {
-        'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
         'Referer': 'https://mangadex.org/',
         'Origin': 'https://mangadex.org',
         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
         'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
+        // Observe que não há cabeçalho 'Authorization' aqui
       }
     });
 
-    if (response.data.includes('marca_dagua')) { 
-      const retryResponse = await axios({
-        method: 'GET',
-        url: imageUrl,
-        responseType: 'arraybuffer',
-        headers: {
-          'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-          'Referer': 'https://mangadex.org/',
-          'Origin': 'https://mangadex.org',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-          'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
-        }
-      });
-      res.setHeader('Content-Type', retryResponse.headers['content-type']);
-      res.send(retryResponse.data);
-    } else {
-      res.setHeader('Content-Type', response.headers['content-type']);
-      res.send(response.data);
-    }
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.send(response.data);
   } catch (error) {
     console.error("Erro ao carregar imagem MangaDex:", error.message);
-    res.redirect(imageUrl);
-  }
-});
-
-app.get("/proxy-image", async (req, res) => {
-  const imageUrl = req.query.url;
-
-  if (!imageUrl) {
-      return res.status(400).send("URL da imagem é obrigatória.");
-  }
-
-  try {
-      // Faz a solicitação da imagem
-      const response = await axios({
-          method: 'GET',
-          url: imageUrl,
-          responseType: 'arraybuffer',
-          headers: {
-              'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-              'Referer': 'https://mangadex.org/',
-              'Origin': 'https://mangadex.org',
-              'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-              'Cache-Control': 'no-cache'
-          }
-      });
-
-      // Define o tipo de conteúdo da resposta
-      if (response.headers['content-type']) {
-          res.setHeader('Content-Type', response.headers['content-type']);
-      }
-
-      // Envia a imagem para o cliente
-      res.send(response.data);
-  } catch (error) {
-      console.error("Erro ao carregar imagem:", error.message);
-      res.status(500).send("Erro ao carregar a imagem.");
+    res.status(500).send("Erro ao carregar imagem");
   }
 });
 
