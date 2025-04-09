@@ -121,8 +121,15 @@ app.get("/mangadex-image", async (req, res) => {
         'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
         'Sec-Fetch-Site': 'same-site',
         'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Dest': 'image'
-      }
+        'Sec-Fetch-Dest': 'image',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Cookie': 'mangadex_session=1; mangadex_rememberme_token=1; mangadex_privacy=1;'
+      },
+      withCredentials: true,
+      timeout: 15000,
+      maxRedirects: 5
     });
 
     if (response.headers['content-type']) {
