@@ -111,129 +111,36 @@ app.get("/mangadex-image", async (req, res) => {
   }
 
   try {
-    console.log("Tentando carregar imagem:", imageUrl);
-
     // Obter uma sessão válida do site principal do MangaDex (sem autenticação)
     const sessionResponse = await axios.get('https://mangadex.org/', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
       },
-      maxRedirects: 5,
-      validateStatus: function (status) {
-        return status < 500; // Aceitar status codes até 499
-      }
+      maxRedirects: 5
     });
 
     const sessionCookies = sessionResponse.headers['set-cookie'];
 
-    // Fazer a requisição da imagem com múltiplos User-Agents e opções
-    const configs = [
-      // Config 1: Padrão com sessão
-      {
-        method: 'GET',
-        url: imageUrl,
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-          'Referer': 'https://mangadex.org/',
-          'Origin': 'https://mangadex.org',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-          'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
-        },
-        validateStatus: function (status) {
-          return status < 500; // Aceitar status codes até 499
-        },
-        timeout: 10000
-      },
-      // Config 2: User-Agent mobile
-      {
-        method: 'GET',
-        url: imageUrl,
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
-          'Referer': 'https://mangadex.org/',
-          'Origin': 'https://mangadex.org',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-        },
-        validateStatus: function (status) {
-          return status < 500; // Aceitar status codes até 499
-        },
-        timeout: 10000
-      },
-      // Config 3: Tentar sem referer
-      {
-        method: 'GET',
-        url: imageUrl,
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-        },
-        validateStatus: function (status) {
-          return status < 500; // Aceitar status codes até 499
-        },
-        timeout: 10000
+    // Fazer a requisição da imagem, mas SEM enviar cabeçalhos de autenticação
+    const response = await axios({
+      method: 'GET',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'Referer': 'https://mangadex.org/',
+        'Origin': 'https://mangadex.org',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
+        // Observe que não há cabeçalho 'Authorization' aqui
       }
-    ];
-
-    // Tenta cada configuração até que uma funcione
-    let response = null;
-    let error = null;
-
-    for (const config of configs) {
-      try {
-        console.log("Tentando com config:", JSON.stringify(config.headers['User-Agent']));
-        response = await axios(config);
-
-        // Se a resposta for válida e não for muito pequena (provável página de erro)
-        if (response.data && response.data.length > 1000) {
-          console.log("Sucesso com config:", JSON.stringify(config.headers['User-Agent']));
-          break;
-        } else {
-          console.log("Resposta muito pequena, tentando próxima config...");
-        }
-      } catch (err) {
-        console.error("Erro na tentativa:", err.message);
-        error = err;
-      }
-    }
-
-    // Se nenhuma configuração funcionou
-    if (!response) {
-      throw error || new Error("Todas as tentativas falharam");
-    }
-
-    // Determinar o tipo de conteúdo com base na extensão do arquivo
-    const extension = imageUrl.split('.').pop().toLowerCase();
-    const contentType =
-      extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' :
-        extension === 'png' ? 'image/png' :
-          extension === 'gif' ? 'image/gif' :
-            extension === 'webp' ? 'image/webp' :
-              response.headers['content-type'] || 'image/jpeg';
-
-    // Retornar a imagem
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache por 24 horas
-    res.send(response.data);
-  } catch (error) {
-    console.error("Erro detalhado ao carregar imagem MangaDex:", {
-      message: error.message,
-      code: error.code,
-      stack: error.stack,
-      url: imageUrl
     });
 
-    // Última tentativa: redirecionar para o URL original
-    // Isso permite que o navegador tente acessar diretamente, o que pode funcionar
-    // em alguns casos, embora possa haver problemas de CORS
-    try {
-      res.redirect(imageUrl);
-    } catch (redirectError) {
-      console.error("Erro ao redirecionar:", redirectError);
-      res.status(500).send("Erro ao carregar imagem");
-    }
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.send(response.data);
+  } catch (error) {
+    console.error("Erro ao carregar imagem MangaDex:", error.message);
+    res.status(500).send("Erro ao carregar imagem");
   }
 });
 
@@ -300,69 +207,7 @@ app.get("/proxy", async (req, res) => {
   }
 });
 
-app.get("/mangadex-cover", async (req, res) => {
-  const { mangaId } = req.query;
 
-  if (!mangaId) {
-    return res.status(400).send("ID do mangá é obrigatório.");
-  }
-
-  try {
-    console.log("Obtendo capa para o mangá:", mangaId);
-
-    // Usar a API do MangaDex para obter informações da capa
-    const coverResponse = await axios({
-      method: 'GET',
-      url: `https://api.mangadex.org/cover?manga[]=${mangaId}&limit=1`,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-      }
-    });
-
-    if (coverResponse.data && coverResponse.data.data && coverResponse.data.data.length > 0) {
-      const cover = coverResponse.data.data[0];
-      const fileName = cover.attributes.fileName;
-
-      console.log("Capa encontrada:", fileName);
-
-      // Gerar URL da imagem
-      const imageUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
-
-      // Obter a imagem
-      const response = await axios({
-        method: 'GET',
-        url: imageUrl,
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-          'Referer': 'https://mangadex.org/',
-          'Origin': 'https://mangadex.org',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        },
-        timeout: 10000
-      });
-
-      // Determinar tipo de conteúdo
-      const extension = fileName.split('.').pop().toLowerCase();
-      const contentType =
-        extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' :
-          extension === 'png' ? 'image/png' :
-            extension === 'gif' ? 'image/gif' :
-              extension === 'webp' ? 'image/webp' :
-                response.headers['content-type'] || 'image/jpeg';
-
-      // Retornar a imagem
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.send(response.data);
-    } else {
-      throw new Error("Capa não encontrada para o mangá");
-    }
-  } catch (error) {
-    console.error("Erro ao carregar capa do MangaDex:", error.message);
-    res.status(500).send("Erro ao carregar capa do mangá");
-  }
-});
 
 app.get("/proxy-alt", async (req, res) => {
   const imageUrl = req.query.url;
