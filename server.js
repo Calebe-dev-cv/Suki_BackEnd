@@ -133,12 +133,25 @@ app.get("/mangadex-image", async (req, res) => {
       }
     });
 
-    if (response.headers['content-type']) {
+    if (response.data.includes('marca_dagua')) { 
+      const retryResponse = await axios({
+        method: 'GET',
+        url: imageUrl,
+        responseType: 'arraybuffer',
+        headers: {
+          'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+          'Referer': 'https://mangadex.org/',
+          'Origin': 'https://mangadex.org',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
+        }
+      });
+      res.setHeader('Content-Type', retryResponse.headers['content-type']);
+      res.send(retryResponse.data);
+    } else {
       res.setHeader('Content-Type', response.headers['content-type']);
+      res.send(response.data);
     }
-
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.send(response.data);
   } catch (error) {
     console.error("Erro ao carregar imagem MangaDex:", error.message);
     res.redirect(imageUrl);
