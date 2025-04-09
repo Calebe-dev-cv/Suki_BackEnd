@@ -102,7 +102,7 @@ app.get("/video-proxy", async (req, res) => {
 
 app.get("/proxy", async (req, res) => {
   const imageUrl = req.query.url;
-  const title = req.query.title || '';
+  const refererUrl = req.query.referer || 'https://mangadex.org/';
   
   if (!imageUrl) {
     console.error("Erro no proxy: URL não fornecida");
@@ -117,21 +117,36 @@ app.get("/proxy", async (req, res) => {
       url: imageUrl,
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://mangadex.org/',
-        'Origin': 'https://mangadex.org'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7',
+        'Referer': refererUrl,
+        'Origin': 'https://mangadex.org',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
+        'Cache-Control': 'no-cache'
       },
-      timeout: 10000
+      timeout: 15000,
+      maxRedirects: 5
     });
     
-    if (response.status !== 200) {
-      console.error(`Erro na resposta: Status ${response.status}`);
-      return res.status(response.status).send(`Erro ao buscar imagem: Status ${response.status}`);
-    }
-    
-    const contentType = response.headers['content-type'];
-    if (contentType) {
-      res.setHeader('Content-Type', contentType);
+    if (response.headers['content-type']) {
+      res.setHeader('Content-Type', response.headers['content-type']);
+    } else {
+      const extension = imageUrl.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg'].includes(extension)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+      } else if (extension === 'png') {
+        res.setHeader('Content-Type', 'image/png');
+      } else if (extension === 'gif') {
+        res.setHeader('Content-Type', 'image/gif');
+      } else if (extension === 'webp') {
+        res.setHeader('Content-Type', 'image/webp');
+      } else {
+        res.setHeader('Content-Type', 'application/octet-stream');
+      }
     }
     
     res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -147,18 +162,7 @@ app.get("/proxy", async (req, res) => {
       url: imageUrl
     });
     
-    if (error.code === 'ECONNABORTED') {
-      return res.status(504).send("Tempo limite excedido ao buscar a imagem.");
-    } else if (error.response) {
-
-      return res.status(error.response.status).send(`Erro ao buscar imagem: ${error.response.statusText}`);
-    } else if (error.request) {
-    
-      return res.status(503).send("Não foi possível obter resposta do servidor de imagens.");
-    } else {
-
-      return res.status(500).send(`Erro ao processar a requisição: ${error.message}`);
-    }
+    res.status(error.response?.status || 500).send("Erro ao carregar imagem");
   }
 });
 
