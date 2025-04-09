@@ -99,13 +99,17 @@ app.get("/video-proxy", async (req, res) => {
   }
 });
 
+
 app.get("/proxy", async (req, res) => {
   const imageUrl = req.query.url;
   const title = req.query.title || '';
   
   if (!imageUrl) {
+    console.error("Erro no proxy: URL não fornecida");
     return res.status(400).send("URL da imagem é obrigatória.");
   }
+  
+  console.log(`Proxy: Tentando buscar imagem: ${imageUrl}`);
   
   try {
     const response = await axios({
@@ -114,9 +118,16 @@ app.get("/proxy", async (req, res) => {
       responseType: 'arraybuffer',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://mangadex.org/'
-      }
+        'Referer': 'https://mangadex.org/',
+        'Origin': 'https://mangadex.org'
+      },
+      timeout: 10000
     });
+    
+    if (response.status !== 200) {
+      console.error(`Erro na resposta: Status ${response.status}`);
+      return res.status(response.status).send(`Erro ao buscar imagem: Status ${response.status}`);
+    }
     
     const contentType = response.headers['content-type'];
     if (contentType) {
@@ -126,9 +137,111 @@ app.get("/proxy", async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
     
     res.send(response.data);
+    console.log(`Proxy: Imagem enviada com sucesso: ${imageUrl}`);
   } catch (error) {
-    console.error("Erro ao buscar imagem:", error.message);
-    res.status(500).send("Erro ao buscar imagem. Tente novamente mais tarde.");
+    console.error("Erro detalhado ao buscar imagem:", {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      url: imageUrl
+    });
+    
+    if (error.code === 'ECONNABORTED') {
+      return res.status(504).send("Tempo limite excedido ao buscar a imagem.");
+    } else if (error.response) {
+
+      return res.status(error.response.status).send(`Erro ao buscar imagem: ${error.response.statusText}`);
+    } else if (error.request) {
+    
+      return res.status(503).send("Não foi possível obter resposta do servidor de imagens.");
+    } else {
+
+      return res.status(500).send(`Erro ao processar a requisição: ${error.message}`);
+    }
+  }
+});
+
+app.get("/proxy-alt", async (req, res) => {
+  const imageUrl = req.query.url;
+  
+  if (!imageUrl) {
+    return res.status(400).send("URL da imagem é obrigatória.");
+  }
+  
+  console.log(`Proxy alternativo: Tentando buscar imagem: ${imageUrl}`);
+  
+  try {
+    const config = {
+      method: 'GET',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://mangadex.org/',
+        'Origin': 'https://mangadex.org',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
+        'Cache-Control': 'no-cache'
+      },
+      timeout: 15000,
+      maxRedirects: 5
+    };
+    
+    const response = await axios(config);
+    
+    if (response.headers['content-type']) {
+      res.setHeader('Content-Type', response.headers['content-type']);
+    } else {
+      const extension = imageUrl.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg'].includes(extension)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+      } else if (extension === 'png') {
+        res.setHeader('Content-Type', 'image/png');
+      } else if (extension === 'gif') {
+        res.setHeader('Content-Type', 'image/gif');
+      } else if (extension === 'webp') {
+        res.setHeader('Content-Type', 'image/webp');
+      } else {
+        res.setHeader('Content-Type', 'application/octet-stream');
+      }
+    }
+    
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(response.data);
+    console.log(`Proxy alternativo: Imagem enviada com sucesso: ${imageUrl}`);
+  } catch (error) {
+    console.error("Erro detalhado no proxy alternativo:", {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      url: imageUrl
+    });
+    
+    try {
+      res.setHeader('Content-Type', 'text/html');
+      res.send(`
+        <html>
+          <head>
+            <meta http-equiv="refresh" content="0;url=${imageUrl}">
+            <style>
+              body { margin: 0; padding: 0; }
+              img { max-width: 100%; height: auto; }
+            </style>
+          </head>
+          <body>
+            <img src="${imageUrl}" alt="Manga Image">
+            <p>Se a imagem não aparecer, <a href="${imageUrl}" target="_blank">clique aqui</a>.</p>
+          </body>
+        </html>
+      `);
+    } catch (fallbackError) {
+      res.status(500).send(`Não foi possível carregar a imagem: ${error.message}`);
+    }
   }
 });
 
