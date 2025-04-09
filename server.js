@@ -9,9 +9,9 @@ const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
 require('dotenv').config();
 
 app.use(cors({
-  origin: ['http://34.95.174.88:3000', 'http://localhost:3000', 'http://localhost:4000', 'http://34.95.174.88:4000',],
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Range'],
+  origin: ['http://34.95.174.88:3000', 'http://localhost:3000', 'http://localhost:4000', 'http://34.95.174.88:4000', 'https://sukisekai.com', 'https://api-anime.sukisekai.com'],
+  methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Range', 'Authorization', 'Accept'],
   exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges'],
   credentials: true
 }));
@@ -28,12 +28,7 @@ app.get("/", (req, res) => {
 })
 
 app.get("/proxy", async (req, res) => {
-
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-
-
+  
   const imageUrl = req.query.url;
 
   if (!imageUrl) return res.status(400).json({ error: "URL da imagem é obrigatória." });
@@ -56,7 +51,8 @@ app.get("/proxy", async (req, res) => {
       responseType: "arraybuffer",
       timeout: 5000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://mangadex.org/'
       }
     });
 
