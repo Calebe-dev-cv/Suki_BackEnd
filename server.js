@@ -111,32 +111,24 @@ app.get("/mangadex-image", async (req, res) => {
   }
 
   try {
-    // Primeiro buscar a página inicial para obter cookies de sessão válidos
     const sessionResponse = await axios.get('https://mangadex.org/', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
       },
       maxRedirects: 5
     });
 
-    // Extrair cookies
     const sessionCookies = sessionResponse.headers['set-cookie'];
 
-    // Agora buscar a imagem com os cookies de sessão
     const response = await axios({
       method: 'GET',
       url: imageUrl,
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'User -Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
         'Referer': 'https://mangadex.org/',
         'Origin': 'https://mangadex.org',
         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Site': 'cross-site',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Dest': 'image',
-        'Cache-Control': 'no-cache',
         'Cookie': sessionCookies?.join('; ') || 'mangadex_session=1'
       }
     });
