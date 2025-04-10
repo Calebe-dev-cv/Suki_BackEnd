@@ -15,11 +15,11 @@ const stream = require('stream');
 const mangadexAuth = require('./mangadexAuth');
 
 const storage = new Storage({
-  projectId: "sukisekai-5e3e0",
+  projectId: process.env.FIREBASE_PROJECT_ID,
   keyFilename: path.join(__dirname, 'firebase-credentials.json')
 });
 
-const bucket = storage.bucket("sukisekai-5e3e0.firebasestorage.app");
+const bucket = storage.bucket(process.env.FIREBASE_STORAGE_BUCKET);
 
 app.get("/mangadex-image-cached", async (req, res) => {
   const imageUrl = req.query.url;
