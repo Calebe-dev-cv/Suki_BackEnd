@@ -7,10 +7,126 @@ const PORT = 5000;
 const cache = new NodeCache({ stdTTL: 600 });
 const GOOGLE_TRANSLATE_API_KEY = 'AIzaSyBH1TNDb25x_z6p2CFs5dCXA_Q5o1ZZr6A';
 require('dotenv').config();
-
+const { Storage } = require('@google-cloud/storage');
+const path = require('path');
+const crypto = require('crypto');
+const stream = require('stream');
 
 const mangadexAuth = require('./mangadexAuth');
 
+const storage = new Storage({
+  projectId: "sukisekai-5e3e0",
+  keyFilename: path.join(__dirname, 'firebase-credentials.json')
+});
+
+const bucket = storage.bucket("sukisekai-5e3e0.firebasestorage.app");
+
+app.get("/mangadex-image-cached", async (req, res) => {
+  const imageUrl = req.query.url;
+  
+  if (!imageUrl) {
+    return res.status(400).send("URL da imagem é obrigatória.");
+  }
+  
+  try {
+    // Gerar nome único para o arquivo baseado na URL
+    const urlHash = crypto.createHash('md5').update(imageUrl).digest('hex');
+    const extension = path.extname(imageUrl) || '.jpg';
+    const fileName = `manga-covers/${urlHash}${extension}`;
+    
+    // Verificar se já temos a imagem armazenada
+    const file = bucket.file(fileName);
+    const [exists] = await file.exists();
+    
+    if (exists) {
+      console.log("Imagem encontrada no cache:", fileName);
+      
+      // Configurar cabeçalhos para o tipo de imagem
+      const contentType = 
+        extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' :
+        extension === '.png' ? 'image/png' :
+        extension === '.gif' ? 'image/gif' :
+        extension === '.webp' ? 'image/webp' :
+        'image/jpeg';
+      
+      // Configurar cabeçalhos CORS
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
+      
+      // Enviar a imagem do Storage
+      file.createReadStream().pipe(res);
+    } else {
+      console.log("Baixando imagem:", imageUrl);
+      
+      // Baixar a imagem do MangaDex
+      const response = await axios({
+        method: 'GET',
+        url: imageUrl,
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+          'Referer': 'https://mangadex.org/',
+          'Origin': 'https://mangadex.org',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        },
+        timeout: 15000
+      });
+      
+      // Determinar tipo de conteúdo
+      const contentType = response.headers['content-type'] || 
+        (extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' :
+        extension === '.png' ? 'image/png' :
+        extension === '.gif' ? 'image/gif' :
+        extension === '.webp' ? 'image/webp' :
+        'image/jpeg');
+      
+      // Criar um buffer a partir dos dados da imagem
+      const buffer = Buffer.from(response.data);
+      
+      // Verificar se é uma imagem válida (tamanho mínimo e tipo de conteúdo correto)
+      if (buffer.length < 1000 || !contentType.startsWith('image/')) {
+        throw new Error("Conteúdo baixado não parece ser uma imagem válida");
+      }
+      
+      // Armazenar a imagem no Firebase Storage
+      const fileStream = new stream.PassThrough();
+      fileStream.end(buffer);
+      
+      await new Promise((resolve, reject) => {
+        fileStream.pipe(
+          file.createWriteStream({
+            metadata: {
+              contentType: contentType,
+              cacheControl: 'public, max-age=31536000', // Cache por 1 ano
+            }
+          })
+          .on('error', reject)
+          .on('finish', resolve)
+        );
+      });
+      
+      console.log("Imagem armazenada com sucesso:", fileName);
+      
+      // Configurar cabeçalhos CORS
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
+      
+      // Enviar a imagem que acabamos de baixar
+      res.send(buffer);
+    }
+  } catch (error) {
+    console.error("Erro ao processar imagem para cache:", error);
+    
+    // Em caso de erro, tente usar o proxy regular como fallback
+    try {
+      res.redirect(`/mangadex-image?url=${encodeURIComponent(imageUrl)}`);
+    } catch (redirectError) {
+      res.status(500).send("Erro ao processar imagem");
+    }
+  }
+});
 
 app.use(cors({
   origin: ['http://34.95.174.88:3000', 'http://localhost:3000', 'http://localhost:4000', 'http://34.95.174.88:4000', 'https://sukisekai.com', 'https://api-anime.sukisekai.com'],
