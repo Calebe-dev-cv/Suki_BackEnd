@@ -21,7 +21,7 @@ const storage = new Storage({
 
 const bucket = storage.bucket(process.env.FIREBASE_STORAGE_BUCKET);
 
-app.get("/mangadex-image-cached", async (req, res) => {
+app.get("/mangadex-image", async (req, res) => {
   const imageUrl = req.query.url;
   
   if (!imageUrl) {
@@ -38,10 +38,14 @@ app.get("/mangadex-image-cached", async (req, res) => {
     const file = bucket.file(fileName);
     const [exists] = await file.exists();
     
+    // Configurar cabeçalhos CORS e cache
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
+    
     if (exists) {
       console.log("Imagem encontrada no cache:", fileName);
       
-      // Configurar cabeçalhos para o tipo de imagem
+      // Determinar o tipo de conteúdo baseado na extensão
       const contentType = 
         extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' :
         extension === '.png' ? 'image/png' :
@@ -49,17 +53,19 @@ app.get("/mangadex-image-cached", async (req, res) => {
         extension === '.webp' ? 'image/webp' :
         'image/jpeg';
       
-      // Configurar cabeçalhos CORS
-      res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
       
-      // Enviar a imagem do Storage
-      file.createReadStream().pipe(res);
+      // Criar URL assinada para acesso direto (alternativa ao pipe)
+      const [url] = await file.getSignedUrl({
+        action: 'read',
+        expires: Date.now() + 60 * 60 * 1000, // 1 hora
+      });
+      
+      return res.redirect(url);
     } else {
       console.log("Baixando imagem:", imageUrl);
       
-      // Baixar a imagem do MangaDex
+      // Baixar a imagem com tratamento de erros e timeout mais longo
       const response = await axios({
         method: 'GET',
         url: imageUrl,
@@ -70,11 +76,12 @@ app.get("/mangadex-image-cached", async (req, res) => {
           'Origin': 'https://mangadex.org',
           'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
         },
-        timeout: 15000
+        timeout: 30000, // Aumentado para 30 segundos
+        maxContentLength: 10 * 1024 * 1024 // Limite de 10MB
       });
       
       // Determinar tipo de conteúdo
-      const contentType = response.headers['content-type'] || 
+      const contentType = response.headers['content-type'] ||
         (extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' :
         extension === '.png' ? 'image/png' :
         extension === '.gif' ? 'image/gif' :
@@ -84,46 +91,51 @@ app.get("/mangadex-image-cached", async (req, res) => {
       // Criar um buffer a partir dos dados da imagem
       const buffer = Buffer.from(response.data);
       
-      // Verificar se é uma imagem válida (tamanho mínimo e tipo de conteúdo correto)
+      // Verificar se é uma imagem válida
       if (buffer.length < 1000 || !contentType.startsWith('image/')) {
         throw new Error("Conteúdo baixado não parece ser uma imagem válida");
       }
       
-      // Armazenar a imagem no Firebase Storage
-      const fileStream = new stream.PassThrough();
-      fileStream.end(buffer);
+      // Configurar metadata para o arquivo
+      const metadata = {
+        contentType: contentType,
+        cacheControl: 'public, max-age=31536000', // Cache por 1 ano
+      };
       
-      await new Promise((resolve, reject) => {
-        fileStream.pipe(
-          file.createWriteStream({
-            metadata: {
-              contentType: contentType,
-              cacheControl: 'public, max-age=31536000', // Cache por 1 ano
-            }
-          })
-          .on('error', reject)
-          .on('finish', resolve)
-        );
+      // Upload direto sem pipe (mais simples e menos propenso a erros)
+      await file.save(buffer, {
+        metadata: metadata,
+        resumable: false // Para arquivos pequenos, uploads não resumíveis são mais rápidos
       });
       
       console.log("Imagem armazenada com sucesso:", fileName);
       
-      // Configurar cabeçalhos CORS
-      res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
-      
-      // Enviar a imagem que acabamos de baixar
-      res.send(buffer);
+      return res.send(buffer);
     }
   } catch (error) {
-    console.error("Erro ao processar imagem para cache:", error);
+    console.error("Erro ao processar imagem:", error.message, error.stack);
     
-    // Em caso de erro, tente usar o proxy regular como fallback
+    // Tentar buscar a imagem original como fallback
     try {
-      res.redirect(`/mangadex-image?url=${encodeURIComponent(imageUrl)}`);
-    } catch (redirectError) {
-      res.status(500).send("Erro ao processar imagem");
+      console.log("Tentando proxy direto como fallback para:", imageUrl);
+      const response = await axios({
+        method: 'GET',
+        url: imageUrl,
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+          'Referer': 'https://mangadex.org/',
+        },
+        timeout: 15000
+      });
+      
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+      return res.send(Buffer.from(response.data));
+    } catch (fallbackError) {
+      console.error("Erro no fallback:", fallbackError.message);
+      return res.status(500).send("Erro ao processar imagem: " + error.message);
     }
   }
 });
