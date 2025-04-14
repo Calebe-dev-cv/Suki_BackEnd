@@ -23,42 +23,42 @@ const bucket = storage.bucket(process.env.FIREBASE_STORAGE_BUCKET);
 
 app.get("/mangadex-image-cached", async (req, res) => {
   const imageUrl = req.query.url;
-  
+
   if (!imageUrl) {
     return res.status(400).send("URL da imagem é obrigatória.");
   }
-  
+
   try {
     // Gerar nome único para o arquivo baseado na URL
     const urlHash = crypto.createHash('md5').update(imageUrl).digest('hex');
     const extension = path.extname(imageUrl) || '.jpg';
     const fileName = `manga-covers/${urlHash}${extension}`;
-    
+
     // Verificar se já temos a imagem armazenada
     const file = bucket.file(fileName);
     const [exists] = await file.exists();
-    
+
     if (exists) {
       console.log("Imagem encontrada no cache:", fileName);
-      
+
       // Configurar cabeçalhos para o tipo de imagem
-      const contentType = 
+      const contentType =
         extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' :
-        extension === '.png' ? 'image/png' :
-        extension === '.gif' ? 'image/gif' :
-        extension === '.webp' ? 'image/webp' :
-        'image/jpeg';
-      
+          extension === '.png' ? 'image/png' :
+            extension === '.gif' ? 'image/gif' :
+              extension === '.webp' ? 'image/webp' :
+                'image/jpeg';
+
       // Configurar cabeçalhos CORS
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
-      
+
       // Enviar a imagem do Storage
       file.createReadStream().pipe(res);
     } else {
       console.log("Baixando imagem:", imageUrl);
-      
+
       // Baixar a imagem do MangaDex
       const response = await axios({
         method: 'GET',
@@ -72,27 +72,27 @@ app.get("/mangadex-image-cached", async (req, res) => {
         },
         timeout: 15000
       });
-      
+
       // Determinar tipo de conteúdo
-      const contentType = response.headers['content-type'] || 
+      const contentType = response.headers['content-type'] ||
         (extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' :
-        extension === '.png' ? 'image/png' :
-        extension === '.gif' ? 'image/gif' :
-        extension === '.webp' ? 'image/webp' :
-        'image/jpeg');
-      
+          extension === '.png' ? 'image/png' :
+            extension === '.gif' ? 'image/gif' :
+              extension === '.webp' ? 'image/webp' :
+                'image/jpeg');
+
       // Criar um buffer a partir dos dados da imagem
       const buffer = Buffer.from(response.data);
-      
+
       // Verificar se é uma imagem válida (tamanho mínimo e tipo de conteúdo correto)
       if (buffer.length < 1000 || !contentType.startsWith('image/')) {
         throw new Error("Conteúdo baixado não parece ser uma imagem válida");
       }
-      
+
       // Armazenar a imagem no Firebase Storage
       const fileStream = new stream.PassThrough();
       fileStream.end(buffer);
-      
+
       await new Promise((resolve, reject) => {
         fileStream.pipe(
           file.createWriteStream({
@@ -101,24 +101,24 @@ app.get("/mangadex-image-cached", async (req, res) => {
               cacheControl: 'public, max-age=31536000', // Cache por 1 ano
             }
           })
-          .on('error', reject)
-          .on('finish', resolve)
+            .on('error', reject)
+            .on('finish', resolve)
         );
       });
-      
+
       console.log("Imagem armazenada com sucesso:", fileName);
-      
+
       // Configurar cabeçalhos CORS
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
-      
+
       // Enviar a imagem que acabamos de baixar
       res.send(buffer);
     }
   } catch (error) {
     console.error("Erro ao processar imagem para cache:", error);
-    
+
     // Em caso de erro, tente usar o proxy regular como fallback
     try {
       res.redirect(`/mangadex-image?url=${encodeURIComponent(imageUrl)}`);
@@ -158,25 +158,30 @@ app.get("/video-proxy", async (req, res) => {
 
   try {
     res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Range');
 
     const headResponse = await axios({
       method: 'HEAD',
       url: videoUrl,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://animefire.plus/'
-      }
+        'Referer': 'https://animefire.plus/',
+        'Origin': 'https://animefire.plus'
+      },
+      timeout: 10000
     });
 
-    const contentLength = headResponse.headers['content-length'];
+    const contentLength = parseInt(headResponse.headers['content-length'] || '0');
     const contentType = headResponse.headers['content-type'] || 'video/mp4';
 
     const range = req.headers.range;
 
-    if (range) {
+    if (range && contentLength > 0) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : contentLength - 1;
+      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 1024 * 1024 * 2, contentLength - 1); // 2MB por chunk ou até o fim
       const chunksize = (end - start) + 1;
 
       res.status(206);
@@ -190,32 +195,44 @@ app.get("/video-proxy", async (req, res) => {
         headers: {
           'Range': `bytes=${start}-${end}`,
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Referer': 'https://animefire.plus/'
+          'Referer': 'https://animefire.plus/',
+          'Origin': 'https://animefire.plus'
         },
-        responseType: 'stream'
+        responseType: 'stream',
+        timeout: 30000
       });
 
       videoResponse.data.pipe(res);
     } else {
+      const initialChunkSize = 1024 * 1024;
+      const end = Math.min(initialChunkSize - 1, contentLength - 1);
 
-      res.setHeader('Content-Length', contentLength);
+      res.status(206);
+      res.setHeader('Content-Range', `bytes 0-${end}/${contentLength}`);
+      res.setHeader('Content-Length', end + 1);
       res.setHeader('Content-Type', contentType);
 
       const videoResponse = await axios({
         method: 'GET',
         url: videoUrl,
         headers: {
+          'Range': `bytes=0-${end}`,
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Referer': 'https://animefire.plus/'
+          'Referer': 'https://animefire.plus/',
+          'Origin': 'https://animefire.plus'
         },
-        responseType: 'stream'
+        responseType: 'stream',
+        timeout: 15000
       });
 
       videoResponse.data.pipe(res);
     }
   } catch (error) {
     console.error("Erro no proxy de vídeo:", error.message);
-    res.status(500).json({ error: "Erro ao processar o vídeo" });
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return res.status(504).json({ error: "Tempo limite excedido ao acessar o vídeo. O servidor de origem está lento." });
+    }
+    res.status(500).json({ error: "Erro ao processar o vídeo", details: error.message });
   }
 });
 
@@ -598,7 +615,7 @@ app.get("/api/animes/search", async (req, res) => {
 
 
 app.post("/api/chat", async (req, res) => {
-  const { message, userData, availableAnimes, availableMangasTags, availableMangasGenres, availableGenres } = req.body;
+  const { message, userData, availableAnimes, availableMangasGenres, availableGenres } = req.body;
 
   if (!message) {
     return res.status(400).json({ error: "Mensagem é obrigatória." });
@@ -664,7 +681,15 @@ app.post("/api/chat", async (req, res) => {
       mangaGenresText = availableMangasGenres.join(", ");
     }
 
-    const currentDate = new Date().toLocaleDateString('pt-BR');
+    let chatHistoryText = "";
+    if (chatHistory && Array.isArray(chatHistory) && chatHistory.length > 0) {
+      chatHistoryText = "HISTÓRICO DA CONVERSA ATUAL:\n";
+      chatHistory.forEach(msg => {
+        const role = msg.sender === 'user' ? "Usuário" : "Suki";
+        chatHistoryText += `${role}: ${msg.text}\n`;
+      });
+      chatHistoryText += "\n";
+    }
 
 
     const systemPrompt = `
